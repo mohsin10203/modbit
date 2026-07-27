@@ -12,6 +12,8 @@ security_class: critical
 requirements:
   - PRD-v5.1-§9.3-CTX-3
   - PRD-v5.1-§9.3-CTX-4
+  - PRD-v5.1-§9.3-CTX-5
+  - PRD-v5.1-§9.3-CTX-7
   - PRD-v5.1-§9.3-CTX-12
   - PRD-v5.1-§9.4-RET-6
   - PRD-v5.1-§9.4-RET-8
@@ -117,6 +119,21 @@ tests:
   - pkg/index:TestEmbedChangeSetIndexesUpsertsAndDropsRemovals
   - pkg/index:TestEmbeddingFailureSurfacesAsAVisibleDegradation
   - pkg/index:TestAVectorCountMismatchIsRefused
+  # Symbol and graph channels (CTX-A01e). CTX-12 lives in the dependency guard above: go/build and
+  # go/importer are refused there, so a parse cannot become an execution.
+  - pkg/index:TestGoExtractorFindsEveryDeclarationKind
+  - pkg/index:TestSymbolSpansCoverTheDocCommentAndAreExact
+  - pkg/index:TestImportEdgesAreExtractedWithTheirSpans
+  - pkg/index:TestSecurityExcludedContentIsNeverParsed
+  - pkg/index:TestSecuritySymbolLookupsNeverCrossRevisions
+  - pkg/index:TestUnparseableFilesDegradeVisibly
+  - pkg/index:TestRemovedPathsDisappearFromTheSymbolIndex
+  - pkg/index:TestReindexingAPathReplacesItsSymbols
+  - pkg/index:TestQualifiedLookupsDistinguishSameNamedMethods
+  - pkg/index:TestSymbolResultsAreIndependentOfIndexingOrder
+  - pkg/index:TestExtractChangeSetIndexesUpsertsAndDropsRemovals
+  - pkg/index:TestExtractChangeSetSurvivesAnUnparseableFile
   # Outstanding for the rest of CTX-A01: native change sources per platform (CTX-A01c3-c5), a native
-  # lexical engine (CTX-A01d2), pgvector behind the vector port (CTX-A01f2), and symbol extraction.
+  # lexical engine (CTX-A01d2), pgvector behind the vector port (CTX-A01f2), and a tree-sitter
+  # extractor for the remaining languages (CTX-A01e2).
   - conformance/context-classification

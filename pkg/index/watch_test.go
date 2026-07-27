@@ -284,6 +284,16 @@ func TestWatcherCoalescesRepeatedLosses(t *testing.T) {
 	for range 8 {
 		source.send(t, index.ChangeBatch{Rescan: true, Reason: index.RescanQueueOverflow})
 	}
+
+	// A send completing only proves the reader *received* it, not that it finished handling it. The
+	// reader loop is receive-then-handle, so a further send that it accepts proves the previous one
+	// was fully handled — without this the eighth signal could still be in flight when the loop is
+	// released, refill the buffer behind it, and earn a second walk. An empty batch is the right
+	// probe because the reader discards it, so it is a synchronisation point and nothing else.
+	// (Found flaking about once in forty runs; a sleep here would have hidden it rather than fixed
+	// it.)
+	source.send(t, index.ChangeBatch{})
+
 	close(release)
 
 	// One update for the initial rescan, one for the coalesced recovery.

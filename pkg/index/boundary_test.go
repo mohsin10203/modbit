@@ -22,14 +22,20 @@ import (
 // primitive.
 func TestSecurityIndexPackageCannotReachTheNetwork(t *testing.T) {
 	forbidden := map[string]string{
-		"net":                                    "raw sockets",
-		"net/http":                               "an HTTP client",
-		"net/url":                                "URL handling, which only a network caller needs",
-		"net/rpc":                                "RPC",
-		"crypto/tls":                             "a TLS client",
-		"os/exec":                                "subprocess execution, which is also how CTX-12 gets violated",
-		"database/sql":                           "a database client",
-		"net/smtp":                               "an SMTP client",
+		"net":          "raw sockets",
+		"net/http":     "an HTTP client",
+		"net/url":      "URL handling, which only a network caller needs",
+		"net/rpc":      "RPC",
+		"crypto/tls":   "a TLS client",
+		"os/exec":      "subprocess execution, which is also how CTX-12 gets violated",
+		"database/sql": "a database client",
+		"net/smtp":     "an SMTP client",
+		// CTX-12: indexing must not execute repository code. Go's own tooling makes that easy to
+		// violate by accident — go/build shells out through os/exec, and go/importer can invoke a
+		// compiler — so symbol extraction is confined to go/parser and go/ast, which only read bytes.
+		"go/build":                               "package loading, which shells out to the go command (CTX-12)",
+		"go/importer":                            "type-checker importers, which can invoke a compiler (CTX-12)",
+		"plugin":                                 "loading code at runtime",
 		"github.com/modbit/modbit/pkg/gateway":   "the gateway directly, bypassing the Embedder port",
 		"github.com/modbit/modbit/pkg/inference": "provider adapters directly",
 	}

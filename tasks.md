@@ -275,7 +275,8 @@ The resolution is the port pattern the repository already uses for pgvector and 
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
 | CTX-A01d2 | Native lexical engine behind the port (Tantivy local / OpenSearch server) | CTX-5 | ⬜ Ready | Engine choice needs an ADR under R-ARCH-01: Tantivy is Rust, so it means cgo or a sidecar |
-| CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
+| CTX-A01e | Symbol extraction and dependency graph — `SymbolExtractor`/`SymbolIndex` ports, stdlib Go extractor, import edges | CTX-5, CTX-7, CTX-12 | ✅ Qualified | `pkg/index/symbol.go`, 11 tests; G1–G8 mutation-verified |
+| CTX-A01e2 | tree-sitter extractor for the remaining languages | CTX-5 | ⬜ Ready | cgo dependency; needs an ADR. Implements `SymbolExtractor` without changing anything above it |
 | CTX-A01f | Semantic index — `VectorIndex` port, `Embedder` port, model-scoped partitions, in-process cosine | CTX-5, RET-1 | ✅ Qualified | `pkg/index/vector.go`, 14 tests; V1–V8 and V10 mutation-verified, V9 documented as structural |
 | CTX-A01f2 | pgvector/HNSW behind the port | CTX-5 | ⬜ Ready | Datastore choice needs an ADR under R-ARCH-01 |
 | CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ✅ Qualified | `pkg/index/worktree.go`, 26 assertions incl. ref-name and partition-key security suites |
@@ -415,6 +416,35 @@ or OpenSearch adapter to inherit from its engine.
 | 104 | BM25 `k1`/`b` are constants, not settings | A ranking-model detail with no operator-meaningful interpretation. Exposing it would invite tuning that RET-10's benchmark, not a preference, should drive. |
 | 105 | One unreadable file does not abort the batch | Aborting would leave every later file unindexed too, turning one missing document into an arbitrary number the caller cannot enumerate. The batch completes and the shortfall returns `MODBIT_CONTEXT_DEGRADED` carrying the channel, not the paths — a path is itself information (decision 78). |
 | 106 | A file that chunks to nothing is **retracted** | An edit that empties a file must not leave its old text searchable. This is decision 57 applied to the lexical channel. |
+
+**CTX-A01e symbol protocol (G1–G8)**
+
+CTX-5's symbol and graph channels. dev-06 places tree-sitter behind it with a per-language grammar
+pack, which is a cgo dependency and an ADR. What ships now is the port plus a Go extractor built
+entirely on the standard library — a real implementation rather than a placeholder, since this
+repository is Go and the channel is useful the day it lands.
+
+| # | Invariant |
+|---|---|
+| G1 | A symbol indexed for one revision is never returned to a query on another |
+| G2 | Only indexable content is parsed |
+| G3 | Parsing never executes repository code |
+| G4 | A removed path never appears in a later result |
+| G5 | Re-indexing a path replaces its symbols and edges |
+| G6 | Results are deterministic |
+| G7 | Every symbol and edge carries the path and span a citation needs |
+| G8 | A file that cannot be parsed degrades visibly and does not abort the batch |
+
+All eight are mutation-verified.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 115 | Symbol extraction uses `go/parser` and `go/ast`, and **never** `go/types` | CTX-12 forbids indexing from executing repository code, and Go's own tooling makes that easy to violate by accident: `go/build` shells out through `os/exec`, and `go/importer` can invoke a compiler. Declarations are recoverable from the syntax tree alone, so a type checker buys resolution this channel does not promise and costs the guarantee that indexing executes nothing. |
+| 116 | G3 is enforced by the dependency guard, not by discipline | `TestSecurityIndexPackageCannotReachTheNetwork` now also fails on `go/build`, `go/importer`, and `plugin`. The guard written for the embedding boundary turned out to be the right mechanism for CTX-12 as well — both are statements about what this package is allowed to reach, and both were previously comments. |
+| 117 | A symbol's span covers its **doc comment** | A citation of a function without its doc comment routinely omits the one sentence that answers the question being asked. A grouped declaration prefers the spec's own doc, so one constant in a block cannot claim the whole block's comment. |
+| 118 | Only `imports` edges, not calls or implements | dev-06 lists calls, inherits, implements, and references too, but those need scope and binding resolution across files — CTX-B01's deep graph. An import is exact, static, and derivable from one file, so it is the edge this channel can assert rather than estimate. An edge carries its span because CTX-7 wants links attributable, and the line that creates the dependency is what a reviewer needs. |
+| 119 | Lookup takes a bare **or** qualified name against one index | `Close` on two types is the case a bare-name index gets wrong and the one a user hits constantly. Filtering one map beats maintaining two that can disagree. |
+| 120 | A file that fails to parse is **retracted**, not left stale | A repository mid-edit routinely holds one. Keeping the previous symbols would answer lookups with declarations at spans that no longer point anywhere, which is worse than answering nothing. |
 
 **CTX-A01f vector protocol (V1–V10)**
 
