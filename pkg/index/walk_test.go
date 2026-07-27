@@ -213,6 +213,29 @@ func TestSecurityWalkPrunesVersionControlMetadata(t *testing.T) {
 	}
 }
 
+// A `git worktree add` checkout has a `.git` *file*, not a directory, holding an absolute path to
+// the repository's git directory. Indexing it as source would publish a local filesystem path into
+// the index and into every embedding built from it.
+func TestSecurityLinkedWorktreeGitFileIsNotIndexed(t *testing.T) {
+	t.Parallel()
+	root := tree(t, map[string]string{
+		".git":        "gitdir: /home/someone/private/repo/.git/worktrees/feature\n",
+		"src/main.go": "package main",
+	})
+
+	got := byPath(mustEntries(t, root))
+	e, ok := got[".git"]
+	if !ok {
+		t.Fatal(".git was not reported at all")
+	}
+	if e.Disposition != index.DispositionExclude || e.Reason != index.ReasonVCSMetadata {
+		t.Errorf(".git file = %s/%s, want exclude/vcs_metadata", e.Disposition, e.Reason)
+	}
+	if !got["src/main.go"].Indexable() {
+		t.Error("the rest of the checkout should still be indexed")
+	}
+}
+
 // A symlink committed to a repository must not become a path into the rest of the machine. The
 // protected list describes a repository's own layout; it was never written to cover whatever an
 // arbitrary link points at.

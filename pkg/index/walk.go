@@ -14,12 +14,17 @@ import (
 	"github.com/modbit/modbit/pkg/taint"
 )
 
-// vcsMetadataDirs are directories that hold version-control state rather than source.
+// vcsMetadataNames are paths that hold version-control state rather than source.
 //
-// They are pruned by name because they are not source in any language, they dwarf the tree they
+// They are excluded by name because they are not source in any language, they dwarf the tree they
 // sit in, and `.git/config` routinely carries a remote URL with an embedded token. Indexing one
 // would put a credential into a retrievable index, which INV-11 forbids.
-var vcsMetadataDirs = []string{".git", ".hg", ".svn", ".bzr"}
+//
+// The check covers files as well as directories: a linked worktree created by `git worktree add`
+// has a `.git` *file* holding an absolute path to the repository's git directory. Treating that as
+// source would publish a local filesystem path into the index and into every embedding built from
+// it.
+var vcsMetadataNames = []string{".git", ".hg", ".svn", ".bzr"}
 
 // Walk limits. They bound the work a single tree can demand; none of them is a policy choice, so
 // none is a setting. A tree that trips one is malformed or hostile, not merely large.
@@ -276,7 +281,7 @@ func (w *Walker) resolveParent(dir string, rep *Report) (frame, bool) {
 			classifier: classifier,
 			patterns:   patterns,
 		}
-		if slices.Contains(vcsMetadataDirs, names[i]) ||
+		if slices.Contains(vcsMetadataNames, names[i]) ||
 			classifier.Classify(File{Path: next.rel, IsDir: true}).Disposition == DispositionExclude {
 			w.diagnose(rep, next.rel, DiagAncestorExcluded,
 				"an ancestor directory is excluded from indexing")
@@ -351,7 +356,7 @@ func (w *Walker) scanDir(ctx context.Context, fr frame, rep *Report, visit func(
 
 // scanSubdir classifies a directory and, when recursive, descends into it unless it is excluded.
 func (w *Walker) scanSubdir(ctx context.Context, fr frame, name string, rep *Report, visit func(Entry) error, recursive bool) error {
-	if slices.Contains(vcsMetadataDirs, name) {
+	if slices.Contains(vcsMetadataNames, name) {
 		rep.Stats.Pruned++
 		rep.Stats.Excluded++
 		return visit(Entry{IsDir: true, Decision: Decision{
@@ -382,6 +387,16 @@ func (w *Walker) scanSubdir(ctx context.Context, fr frame, name string, rep *Rep
 // walkFile classifies a single non-directory entry.
 func (w *Walker) walkFile(fr frame, entry os.DirEntry, rep *Report, visit func(Entry) error) error {
 	rep.Stats.Files++
+
+	if slices.Contains(vcsMetadataNames, entry.Name()) {
+		return w.emit(rep, visit, Entry{Decision: Decision{
+			Path:        fr.rel,
+			Disposition: DispositionExclude,
+			Reason:      ReasonVCSMetadata,
+			Detail:      entry.Name(),
+			Provenance:  taint.RepositoryUntrusted,
+		}})
+	}
 
 	// Kind is judged before the path rules, from the directory entry itself, so no decision here
 	// depends on opening anything.

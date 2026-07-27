@@ -254,7 +254,7 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 | CTX-A01d | Lexical index (Tantivy-class) | CTX-5 | ⬜ Ready | |
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
 | CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
-| CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ⬜ Ready | |
+| CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ✅ Qualified | `pkg/index/worktree.go`, 26 assertions incl. ref-name and partition-key security suites |
 | CTX-A01h | Immutable index snapshots recording source revision, indexer version, policy version | CTX-8, CTX-9 | ⬜ Ready | |
 | CTX-A01i | Citations and context-item provenance | RET-6, RET-9 | ⬜ Ready | |
 
@@ -294,6 +294,26 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 | 61 | `Observe` never blocks on a flush | A watcher stalled behind a rescan lets the operating system's own notification queue overflow, which costs notifications outright. Scans run without the lock; a change landing mid-scan stays pending for the next flush, which the freshness budget accounts for. |
 | 62 | `Flush` before an initial `Rescan` is an error, not an empty index | Applying deltas to a state that was never established would record a tree consisting of whatever happened to change, and report it as an index. |
 | 63 | `ChangeSet.FullRescan` marks recovery explicitly | A watcher that dropped notifications leaves the reindexer diverged from the tree with nothing to reveal it. Recovery is a full walk, and the flag is what stops a consumer from mistaking it for an ordinary delta (SDD §15: index failures degrade visibly). |
+
+**CTX-A01g decisions**
+
+Requirement: CTX-3. Budget: PRD §7 "Branch/worktree contamination incidents — 0".
+
+| # | Decision | Rationale |
+|---|---|---|
+| 64 | Git state is read from the **plumbing files**, never by running `git` | A security decision before a dependency one. Repository-controlled configuration can make git execute programs it names — hooks, `core.fsmonitor`, aliases, credential helpers — so invoking git inside a repository the user has merely opened would put CTX-12 ("indexing must not execute repository code") at the mercy of that repository's own config. `safe.directory` exists because this is a real class of attack. Reading files keeps CTX-12 structural. |
+| 65 | The partition key covers worktree and branch, **not** the commit | Committing advances the index it is in; it does not move it elsewhere. Keying on the commit would create a fresh partition per commit and make incremental indexing pointless. A detached HEAD has no branch to identify it, so the commit stands in. |
+| 66 | The partition key is a **digest**, not the names | A branch name is chosen by whoever can push, so it is untrusted input (R-SEC-01) flowing into a partition key. A key that embedded `../other-space` verbatim would let a branch name address a partition it does not own. Hashing makes that structurally impossible while staying injective. `TestSecurityKeyCannotBeSteeredByABranchName` covers five collision and traversal attempts. |
+| 67 | Ref names are validated against git's own `check-ref-format` rules | Those rules exist precisely to stop a name being read as something other than a name. The name flows into keys, status displays, logs, and snapshot records, so it is checked once at the boundary rather than trusted at each. |
+| 68 | **Any** revision change refuses an incremental flush | A checkout rewrites the working tree in bulk, far faster than a notification queue drains, so the pending changes cannot be assumed to describe it — applying them merges one branch's content into the other's index, and nothing downstream can tell afterwards. The conservative rule costs a full rescan after a plain `git commit`, which does not touch the working tree. That is the accepted price of the zero-contamination budget; distinguishing the two cases from HEAD alone is not reliable. |
+| 69 | A tree with no checkout is indexed **without** revision awareness, not refused | `ErrNotARepository` is an ordinary outcome. Modbit indexes plain directories, and refusing them would trade a real capability for a guarantee nobody asked for. |
+| 70 | A revision that cannot be read is an **error**, not a zero `Revision` | Two empty revisions compare equal, and two different tree states comparing equal is exactly the contamination the type exists to prevent. |
+
+**CTX-A01g bug fix**
+
+| # | Bug | Why it mattered | Fix |
+|---|---|---|---|
+| B-11 | A linked worktree's `.git` **file** was indexed as source | `vcsMetadataDirs` was only consulted for directories, but `git worktree add` writes `.git` as a file holding an absolute path to the repository's git directory. That path was being indexed and would have been embedded — a local filesystem path published into retrievable content. Found by probing the walker against a real linked-worktree layout, not by a failing test. | The check now covers files as well as directories, renamed `vcsMetadataNames`. `TestSecurityLinkedWorktreeGitFileIsNotIndexed`. |
 
 **CTX-A01b bug fixes**
 

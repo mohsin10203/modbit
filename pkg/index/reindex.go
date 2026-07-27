@@ -131,12 +131,39 @@ type Reindexer struct {
 	walker *Walker
 	policy FlushPolicy
 
+	// worktree is nil for a tree that is not under version control, which is a supported case: a
+	// directory with no checkout is indexed without revision awareness rather than refused.
+	worktree *Worktree
+
 	mu      sync.Mutex
 	state   map[string]fileState
 	pending map[string]Change
 	// oldest is when the oldest pending change was observed, for the freshness SLO.
 	oldest, newest time.Time
 	scanned        bool
+	// revision is the tree state the current index corresponds to (CTX-3).
+	revision Revision
+}
+
+// BindWorktree makes the reindexer revision-aware (CTX-3).
+//
+// Once bound, an incremental flush verifies that the checkout is still the one the index was built
+// from and refuses to apply deltas across a branch switch. Nothing else changes: a tree with no
+// checkout indexes exactly as before.
+func (r *Reindexer) BindWorktree(w *Worktree) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.worktree = w
+	// The binding invalidates any state gathered before it, since that state was never checked
+	// against a revision.
+	r.scanned = false
+}
+
+// Revision reports the tree state the current index corresponds to.
+func (r *Reindexer) Revision() Revision {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.revision
 }
 
 // NewReindexer returns a Reindexer over a tree. The zero FlushPolicy selects the defaults.
@@ -220,6 +247,14 @@ func (r *Reindexer) DueAt() time.Time {
 // would diverge from the tree with nothing to reveal it — so an overflow must resolve to this, and
 // the resulting ChangeSet says FullRescan so the degradation is not silent (SDD §15).
 func (r *Reindexer) Rescan(ctx context.Context) (ChangeSet, Report, error) {
+	// Read before the walk, not after: a revision captured afterwards would name a tree state that
+	// the scan may not have seen, and the next flush would compare against it and find no
+	// divergence to report.
+	revision, err := r.currentRevision()
+	if err != nil {
+		return ChangeSet{}, Report{}, err
+	}
+
 	observed := make(map[string]Entry)
 	report, err := r.walker.Walk(ctx, func(e Entry) error {
 		observed[e.Path] = e
@@ -234,6 +269,7 @@ func (r *Reindexer) Rescan(ctx context.Context) (ChangeSet, Report, error) {
 	set := r.reconcile(observed, func(known string) bool { return true })
 	set.FullRescan = true
 	r.scanned = true
+	r.revision = revision
 	// A full walk supersedes every pending change: it observed the tree as it is now.
 	clear(r.pending)
 	r.oldest, r.newest = time.Time{}, time.Time{}
@@ -259,6 +295,7 @@ func (r *Reindexer) Flush(ctx context.Context) (ChangeSet, Report, error) {
 		r.mu.Unlock()
 		return ChangeSet{}, Report{}, nil
 	}
+	indexed := r.revision
 	changes := make([]Change, 0, len(r.pending))
 	for _, c := range r.pending {
 		changes = append(changes, c)
@@ -266,6 +303,26 @@ func (r *Reindexer) Flush(ctx context.Context) (ChangeSet, Report, error) {
 	clear(r.pending)
 	r.oldest, r.newest = time.Time{}, time.Time{}
 	r.mu.Unlock()
+
+	// CTX-3, and the zero-contamination budget in PRD §7. A checkout rewrites the working tree in
+	// bulk, far faster than a notification queue drains, so the changes this flush holds cannot be
+	// assumed to describe it. Applying them would merge one branch's content into the other's
+	// index, and nothing downstream could tell the difference afterwards.
+	current, err := r.currentRevision()
+	if err != nil {
+		r.Observe(changes...)
+		return ChangeSet{}, Report{}, err
+	}
+	if !current.Equal(indexed) {
+		r.Observe(changes...)
+		return ChangeSet{}, Report{}, modberr.New(modberr.CodeSnapshotDiverged,
+			"the checkout changed since the index was built; a full rescan is required").
+			WithDetails(map[string]string{
+				"expected_revision": indexed.Commit,
+				"actual_revision":   current.Commit,
+				"resource_type":     "index_worktree",
+			})
+	}
 
 	scopes := r.scopes(changes)
 	observed := make(map[string]Entry)
@@ -296,6 +353,18 @@ func (r *Reindexer) Flush(ctx context.Context) (ChangeSet, Report, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.reconcile(observed, inScopes(scopes)), report, nil
+}
+
+// currentRevision reads the checkout's revision, or the zero Revision when the tree is not under
+// version control.
+func (r *Reindexer) currentRevision() (Revision, error) {
+	r.mu.Lock()
+	w := r.worktree
+	r.mu.Unlock()
+	if w == nil {
+		return Revision{}, nil
+	}
+	return w.Revision()
 }
 
 // scope is one directory a flush must rescan.
