@@ -120,6 +120,14 @@ db-rollback-check: ## Verify every migration has an assessed rollback (R-SQL-01)
 api-breaking-check: ## Diff the API contract against the previous release
 	@echo "api-breaking-check: no published API surface yet"
 
+.PHONY: errors-freeze
+errors-freeze: ## Regenerate the error-contract lock (requires an ADR for any non-additive change)
+	$(GO) run $(GENERATOR) -contracts ./contracts -root . -freeze-errors
+
+.PHONY: errors-freeze-check
+errors-freeze-check: ## Fail when an error code was removed or its wire semantics changed
+	$(GO) run $(GENERATOR) -contracts ./contracts -root . -check errors-freeze
+
 .PHONY: settings-schema-check
 settings-schema-check: ## Validate every Settings Registry definition
 	$(GO) run $(GENERATOR) -contracts ./contracts -root . -check settings
@@ -140,7 +148,7 @@ docs-check: ## Verify tracker and governance documents are present and consisten
 # --------------------------------------------------------------------------------------------
 
 .PHONY: check
-check: generate-check format-check lint typecheck test-unit settings-schema-check capability-check docs-check ## Pre-review gate
+check: generate-check format-check lint typecheck test-unit errors-freeze-check settings-schema-check capability-check docs-check ## Pre-review gate
 
 .PHONY: package
 package: ## Build distributable artifacts

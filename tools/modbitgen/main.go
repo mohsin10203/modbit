@@ -25,17 +25,18 @@ func main() {
 	var (
 		contractsDir = flag.String("contracts", "./contracts", "path to the contracts directory")
 		rootDir      = flag.String("root", ".", "repository root that generated files are written under")
-		checkOnly    = flag.String("check", "", "validate one contract family without writing: settings|events|errors|capabilities")
+		checkOnly    = flag.String("check", "", "validate one contract family without writing: settings|events|errors|capabilities|errors-freeze")
+		freezeErrors = flag.Bool("freeze-errors", false, "regenerate the error-contract lock file")
 	)
 	flag.Parse()
 
-	if err := run(*contractsDir, *rootDir, *checkOnly); err != nil {
+	if err := run(*contractsDir, *rootDir, *checkOnly, *freezeErrors); err != nil {
 		fmt.Fprintf(os.Stderr, "modbitgen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(contractsDir, rootDir, checkOnly string) error {
+func run(contractsDir, rootDir, checkOnly string, freezeErrors bool) error {
 	contractsDir = filepath.Clean(contractsDir)
 	rootDir = filepath.Clean(rootDir)
 
@@ -60,6 +61,15 @@ func run(contractsDir, rootDir, checkOnly string) error {
 		return fmt.Errorf("capabilities: %w", err)
 	}
 
+	lockPath := filepath.Join(contractsDir, "errors", "catalog.lock")
+	if freezeErrors {
+		if err := writeIfChanged(lockPath, errCatalog.lockContent()); err != nil {
+			return err
+		}
+		fmt.Printf("errors-freeze: locked %d codes\n", len(errCatalog.Codes))
+		return nil
+	}
+
 	switch checkOnly {
 	case "":
 		// Generate everything below.
@@ -74,6 +84,8 @@ func run(contractsDir, rootDir, checkOnly string) error {
 	case "errors":
 		fmt.Printf("errors-check: %d error codes: ok\n", len(errCatalog.Codes))
 		return nil
+	case "errors-freeze":
+		return errCatalog.checkFreeze(lockPath)
 	case "capabilities":
 		fmt.Printf("capability-check: %d capabilities: ok\n", len(capCatalog.Capabilities))
 		return nil
