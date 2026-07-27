@@ -53,7 +53,9 @@ const (
 	// Build and maintain local retrieval indexes for registered sources.
 	KeyContextIndexingEnabled Key = "context.indexing.enabled"
 
-	// Additional exclusion patterns, unioned across scopes.
+	// Additional exclusion patterns, unioned across scopes. `.modbit/` holds Modbit's own state,
+	// including index snapshots; indexing it would make each scan record the previous scan's output as
+	// repository content. The union merge means no scope can remove that exclusion.
 	KeyContextIndexingExcludedGlobs Key = "context.indexing.excluded_globs"
 
 	// Where index segments are built and stored. Local is the most restrictive boundary.
@@ -382,12 +384,12 @@ var definitions = []Definition{
 		Namespace:     "context",
 		SchemaVersion: 1,
 		Type:          TypeStringList,
-		Default:       []any{"**/node_modules/**", "**/target/**", "**/.venv/**", "**/dist/**"},
+		Default:       []any{"**/.modbit/**", "**/node_modules/**", "**/target/**", "**/.venv/**", "**/dist/**"},
 		Scopes:        []Scope{ScopeOrganization, ScopeTeam, ScopeSpace, ScopeRepository, ScopeRepositoryLocal},
 		Merge:         MergeUnion,
 		ChangeEffect:  EffectNextIndex,
 		SecurityClass: SecurityMedium,
-		Description:   "Additional exclusion patterns, unioned across scopes.",
+		Description:   "Additional exclusion patterns, unioned across scopes. `.modbit/` holds Modbit's own state, including index snapshots; indexing it would make each scan record the previous scan's output as repository content. The union merge means no scope can remove that exclusion.",
 	},
 	{
 		Key:              "context.indexing.location",

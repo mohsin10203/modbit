@@ -49,12 +49,15 @@ settings:
 
   - key: context.indexing.excluded_globs
     type: string_list
-    default: ["**/node_modules/**", "**/target/**", "**/.venv/**", "**/dist/**"]
+    default: ["**/.modbit/**", "**/node_modules/**", "**/target/**", "**/.venv/**", "**/dist/**"]
     scopes: [organization, team, space, repository, repository_local]
     merge: union
     change_effect: next_index
     security_class: medium
-    description: Additional exclusion patterns, unioned across scopes.
+    description: >-
+      Additional exclusion patterns, unioned across scopes. `.modbit/` holds Modbit's own state,
+      including index snapshots; indexing it would make each scan record the previous scan's
+      output as repository content. The union merge means no scope can remove that exclusion.
 
   - key: context.retrieval.budget_tokens
     type: int

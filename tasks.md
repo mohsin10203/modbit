@@ -255,7 +255,7 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
 | CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
 | CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ✅ Qualified | `pkg/index/worktree.go`, 26 assertions incl. ref-name and partition-key security suites |
-| CTX-A01h | Immutable index snapshots recording source revision, indexer version, policy version | CTX-8, CTX-9 | ⬜ Ready | |
+| CTX-A01h | Immutable index snapshots recording source revision, indexer version, policy version | CTX-8, CTX-9 | ✅ Qualified | `pkg/index/snapshot.go`, 20 tests incl. tamper detection and partition scoping |
 | CTX-A01i | Citations and context-item provenance | RET-6, RET-9 | ⬜ Ready | |
 
 **CTX-A01a decisions**
@@ -308,6 +308,22 @@ Requirement: CTX-3. Budget: PRD §7 "Branch/worktree contamination incidents —
 | 68 | **Any** revision change refuses an incremental flush | A checkout rewrites the working tree in bulk, far faster than a notification queue drains, so the pending changes cannot be assumed to describe it — applying them merges one branch's content into the other's index, and nothing downstream can tell afterwards. The conservative rule costs a full rescan after a plain `git commit`, which does not touch the working tree. That is the accepted price of the zero-contamination budget; distinguishing the two cases from HEAD alone is not reliable. |
 | 69 | A tree with no checkout is indexed **without** revision awareness, not refused | `ErrNotARepository` is an ordinary outcome. Modbit indexes plain directories, and refusing them would trade a real capability for a guarantee nobody asked for. |
 | 70 | A revision that cannot be read is an **error**, not a zero `Revision` | Two empty revisions compare equal, and two different tree states comparing equal is exactly the contamination the type exists to prevent. |
+
+**CTX-A01h decisions**
+
+Requirements: CTX-8 (record source revision, indexer version, policy version), CTX-9 (corruption detectable and recoverable through rebuild), SDD §17 / UPG-6 (indexer-version change triggers a controlled rebuild).
+
+| # | Decision | Rationale |
+|---|---|---|
+| 71 | **Two** digests, for two different questions | `ManifestDigest` covers the sorted manifest alone and is the *content* identity: two scans of an unchanged tree produce the same value, which answers "did anything change" without an entry-by-entry comparison. `Digest` covers the whole record including identifier and timestamp, and is the *integrity* check CTX-9 needs. Conflating them was the first attempt and it failed immediately: the record digest covers fields that legitimately differ between two identical scans, so it could never serve as content identity. |
+| 72 | `Verify` checks the manifest digest **first**, not only the record digest | The record digest covers the *stored* `ManifestDigest`, not the manifest itself, so a record-only check passes whenever both were altered together — the shape deliberate poisoning takes, as opposed to the shape bit-rot takes. A mutation test confirms the manifest check is the only thing standing between a tampered manifest and a clean read. |
+| 73 | Reuse is decided on `ConfigDigest`, but `PolicySnapshotID` is still recorded | CTX-8 asks for the policy version, so it is recorded for traceability. Deciding reuse on it would rebuild the whole index whenever any unrelated setting changed — `context.retrieval.budget_tokens` must not invalidate a repository's index. `ConfigDigest` covers exactly the three settings that determine what gets indexed. |
+| 74 | Every rebuild trigger is distinguishable | An operator seeing a rebuild needs to know whether it was an upgrade, a policy change, a branch switch, or corruption, because those call for different responses. Corruption outranks staleness: a damaged snapshot's version field is not evidence of anything. |
+| 75 | `Read` verifies rather than offering verification | An unverified snapshot is indistinguishable from a verified one once it is a value in memory. CTX-9 requires corruption to be *detected*, not merely detectable, so there is no path that returns an unchecked snapshot. `Read` also rejects a file whose internal identifier does not match the one requested, which is what renaming one snapshot over another looks like. |
+| 76 | Writes are atomic and snapshots are never overwritten | A crash mid-write would otherwise leave a truncated file that reads as a valid but shorter manifest. The payload is fsynced before the rename, so durability precedes visibility. Immutability is enforced rather than assumed: a store that accepted a replacement would let the record of what was indexed be rewritten after the fact. |
+| 77 | `Latest` is scoped to the revision's partition and skips corrupt snapshots | The newest snapshot in the directory may belong to another branch, and serving it is exactly the contamination CTX-3 forbids. A corrupt snapshot must not hide an intact older one — recovery is CTX-9's whole point. |
+| 78 | Excluded paths are **rejected** from a manifest, not filtered out | A path is itself information, which is why the classifier refuses to record excluded ones. A caller passing one has misunderstood what a manifest is, and silently dropping it would hide that. |
+| 79 | `**/.modbit/**` added to the shipped `excluded_globs` default | The snapshot store lives there. Indexing it would make each scan record the previous scan's output as repository content, growing without bound. The `union` merge on that setting means no scope can remove the exclusion. |
 
 **CTX-A01g bug fix**
 
