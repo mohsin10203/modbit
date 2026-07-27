@@ -51,7 +51,7 @@ Docket: `SET-A01`, `QA-A01` precursors. PRD: §20A (settings), §26 (API/events)
 | FND-07 | `tools/modbitgen` — Go + TS generation from `contracts/` | R-CTR-02/03 | ✅ Qualified | `tools/modbitgen`, 20 validation tests |
 | FND-08 | `pkg/taint` — provenance classes, lattice, propagation, ledger | TNT-1, TNT-2, TNT-6 | ✅ Qualified | `pkg/taint`, 24 tests |
 | FND-09 | `pkg/policy` — side-effect classes, decision engine, taint escalation | SFX-1..5, TNT-3/4 | ✅ Qualified | `pkg/policy`, 34 tests incl. TNT-7 adversarial suite |
-| FND-10 | `make check` wiring + generated-code drift gate + error-contract freeze | R-CTR-03, R-CTR-04 | ✅ Qualified | `make check` green — 379 assertions, `-race` clean |
+| FND-10 | `make check` wiring + generated-code drift gate + error-contract freeze | R-CTR-03, R-CTR-04 | ✅ Qualified | `make check` green — 417 assertions, `-race` clean |
 
 ### FND acceptance
 
@@ -233,7 +233,7 @@ PRD §6.1. Docket §3.
 | IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | 🚧 In Progress — resolver, generation, and validation done (FND-06/07); local files, UI metadata, and sync outstanding |
-| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | ⬜ Proposed |
+| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — see breakdown below |
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | 🚧 In Progress — see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
@@ -241,6 +241,33 @@ PRD §6.1. Docket §3.
 | EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | ⬜ Proposed |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
+### CTX-A01 breakdown
+
+Capability registry entry: `contracts/capabilities/context.classification.yaml`.
+
+| ID | Task | Requirements | Status | Evidence |
+|---|---|---|---|---|
+| CTX-A01a | Ignore/classification filter — gitignore-compatible matching, hierarchical sources, protected paths, binary/generated/size classification, provenance assignment | CTX-4, CTX-12, TNT-1 | ✅ Qualified | `pkg/index`, 38 assertions |
+| CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ⬜ Ready | pattern layer done; the walker is not |
+| CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | ⬜ Ready | |
+| CTX-A01d | Lexical index (Tantivy-class) | CTX-5 | ⬜ Ready | |
+| CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
+| CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
+| CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ⬜ Ready | |
+| CTX-A01h | Immutable index snapshots recording source revision, indexer version, policy version | CTX-8, CTX-9 | ⬜ Ready | |
+| CTX-A01i | Citations and context-item provenance | RET-6, RET-9 | ⬜ Ready | |
+
+**CTX-A01a decisions**
+
+| # | Decision | Rationale |
+|---|---|---|
+| 42 | The protected-path list is **hardcoded**, checked before every other rule | Every other exclusion is a preference about noise and cost; this one is INV-11. A repository must not be able to opt *into* having its deploy keys embedded in a vector index by omitting them from `.gitignore`, and an administrator must not be able to switch it off during an incident. `TestProtectedPathsOutrankEveryOtherRule` proves a `!` negation cannot reach a private key. |
+| 43 | Three dispositions, not two: `index`, `reference`, `exclude` | A large fixture or a binary asset still exists and is legitimately citable; parsing or embedding it would waste budget and produce noise. Collapsing `reference` into `exclude` would make those files invisible to a user who knows they are there. Oversized, binary, and empty files are `reference`. |
+| 44 | A negation cannot re-include a file under an excluded directory | Matches git exactly. Without it, one `!` line in a nested ignore file could pull an entire excluded tree back into the index. |
+| 45 | `.gitignore` is honoured only when policy says so; `.modbitignore` always applies | A repository's build exclusions are not necessarily its indexing exclusions. Modbit's own ignore files are not subject to that switch. |
+| 46 | The classifier receives a byte **prefix**, never a reader or a path to open | Keeps it pure and makes CTX-12 structural: it cannot execute repository code because it never holds a handle to anything. |
+| 47 | Provenance is assigned even on excluded files | A zero-valued `taint.Class` reads as `user_trusted`. A later decision must never see an unset class on repository content. |
+
 | QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | ⬜ Proposed |
 
 ### MOD-A01 breakdown

@@ -1,0 +1,47 @@
+# Capability: index ignore and classification filter.
+#
+# CTX-4 requires ignored and restricted content to be excluded *before* indexing, which makes this
+# filter the gate every other context capability sits behind. It is also where SDD §8 places
+# provenance assignment (TNT-1), so a context item cannot exist without a taint class.
+
+id: context.classification
+version: 1
+owner: knowledge
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§9.3-CTX-4
+  - PRD-v5.1-§9.3-CTX-12
+  - PRD-v5.1-§20A.10-context-and-indexing
+  - SDD-v5.1-§8-classification-filter
+  - PRD-v5.1-§12A-TNT-1
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events:
+  - context.index.started
+  - context.index.completed
+  - context.index.failed
+
+settings:
+  - context.indexing.enabled
+  - context.indexing.respect_gitignore
+  - context.indexing.excluded_globs
+  - context.indexing.max_file_bytes
+
+tests:
+  - pkg/index:TestGitignoreSemantics
+  - pkg/index:TestNegationCannotReachInsideAnExcludedDirectory
+  - pkg/index:TestSecurityProtectedPathsAreNeverIndexed
+  - pkg/index:TestProtectedPathsOutrankEveryOtherRule
+  - pkg/index:TestRepositoryContentIsClassifiedUntrusted
+  - pkg/index:TestGitignoreIsHonouredOnlyWhenPolicyAllows
+  # Outstanding for the rest of CTX-A01: hierarchical ignore discovery over a real tree, the file
+  # watcher, lexical/vector/symbol indexes, branch and worktree awareness, and citations.
+  - conformance/context-classification
