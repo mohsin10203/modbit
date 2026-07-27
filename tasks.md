@@ -9,7 +9,7 @@
 > **Status values:** `Proposed` → `Ready` → `In Progress` → `Blocked` → `Review` → `Qualified` →
 > `Released`. No task is `Qualified` without Capability Registry and acceptance evidence.
 
-**Last updated:** 2026-07-27
+**Last updated:** 2026-07-28
 
 ---
 
@@ -233,7 +233,7 @@ PRD §6.1. Docket §3.
 | IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | 🚧 In Progress — resolver, generation, and validation done (FND-06/07); local files, UI metadata, and sync outstanding |
-| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — see breakdown below |
+| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — see breakdown below. Classification, walk, incremental reindex, worktree awareness, snapshots, and citations Qualified; the OS change source and the three indexes remain |
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | 🚧 In Progress — see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
@@ -245,18 +245,26 @@ PRD §6.1. Docket §3.
 
 Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 
+**Dependency posture (decided 2026-07-28).** Well-scoped third-party Go dependencies may be adopted
+for the indexing stack when they are the standard choice, each recorded as an ADR carrying the
+justification R-GO-09 requires. This unblocks `CTX-A01c2` (`fsnotify`) and applies to `CTX-A01e`
+(tree-sitter or per-language parsers). Two constraints survive it: a parser must not execute
+repository code (CTX-12), and a new datastore, transport, or runtime still needs an ADR under
+R-ARCH-01 rather than a dependency note. `go.mod` currently holds one direct dependency,
+`gopkg.in/yaml.v3`.
+
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
 | CTX-A01a | Ignore/classification filter — gitignore-compatible matching, hierarchical sources, protected paths, binary/generated/size classification, provenance assignment | CTX-4, CTX-12, TNT-1 | ✅ Qualified | `pkg/index`, 38 assertions |
 | CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ✅ Qualified | `pkg/index/walk.go`, 19 tests incl. 4 security suites |
 | CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | 🚧 In Progress | `pkg/index/reindex.go`, 17 tests. Reindex engine, scoped rescan, and flush policy Qualified; the OS change source is outstanding — see below |
-| CTX-A01c2 | OS change source feeding `Reindexer.Observe` (FSEvents/inotify/ReadDirectoryChangesW), incl. queue-overflow → `Rescan` | CTX-2 | ⛔ Blocked | Needs a dependency decision: `fsnotify` is the standard Go choice but would be the repository's second direct dependency (R-GO-09, R-ARCH-01). Not adopted unilaterally |
+| CTX-A01c2 | OS change source feeding `Reindexer.Observe` (FSEvents/inotify/ReadDirectoryChangesW), incl. queue-overflow → `Rescan` | CTX-2 | ⬜ Ready | Unblocked 2026-07-28 by the dependency posture below: `fsnotify` may be adopted, with an ADR recording the justification R-GO-09 requires |
 | CTX-A01d | Lexical index (Tantivy-class) | CTX-5 | ⬜ Ready | |
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
 | CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
 | CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ✅ Qualified | `pkg/index/worktree.go`, 26 assertions incl. ref-name and partition-key security suites |
 | CTX-A01h | Immutable index snapshots recording source revision, indexer version, policy version | CTX-8, CTX-9 | ✅ Qualified | `pkg/index/snapshot.go`, 20 tests incl. tamper detection and partition scoping |
-| CTX-A01i | Citations and context-item provenance | RET-6, RET-9 | ⬜ Ready | |
+| CTX-A01i | Citations and context-item provenance | RET-6, RET-8, RET-9 | ✅ Qualified | `pkg/index/citation.go`, 15 tests incl. 6 security suites; C1–C10 mutation-verified |
 
 **CTX-A01a decisions**
 
@@ -324,6 +332,49 @@ Requirements: CTX-8 (record source revision, indexer version, policy version), C
 | 77 | `Latest` is scoped to the revision's partition and skips corrupt snapshots | The newest snapshot in the directory may belong to another branch, and serving it is exactly the contamination CTX-3 forbids. A corrupt snapshot must not hide an intact older one — recovery is CTX-9's whole point. |
 | 78 | Excluded paths are **rejected** from a manifest, not filtered out | A path is itself information, which is why the classifier refuses to record excluded ones. A caller passing one has misunderstood what a manifest is, and silently dropping it would hide that. |
 | 79 | `**/.modbit/**` added to the shipped `excluded_globs` default | The snapshot store lives there. Indexing it would make each scan record the previous scan's output as repository content, growing without bound. The `union` merge on that setting means no scope can remove the exclusion. |
+
+**CTX-A01i citation protocol (C1–C10)**
+
+Requirements: RET-6 (repository, path, revision, span, source, retrieval reason on every
+model-visible item), RET-8 (never silently mix incompatible revisions), RET-9 (record why whole-file
+inclusion was required). Metrics gate: `testing-and-acceptance` §7 "provenance 100%".
+
+Stated as numbered invariants in `pkg/index/citation.go`, one test each in `citation_test.go`. A
+test without a C-number, or a C-number without a test, is a gap. All ten were mutation-verified:
+each invariant was broken in turn and the named test failed.
+
+| # | Invariant |
+|---|---|
+| C1 | An excluded path can never become a context item |
+| C2 | A `reference` item cites a whole file and carries no span and no content digest |
+| C3 | All six RET-6 fields are present; a missing one is refused at construction |
+| C4 | Provenance is derived from the index, never supplied by the caller |
+| C5 | Whole-file inclusion carries a reason; a span-limited item must not carry one |
+| C6 | A cited span lies inside the file the manifest recorded |
+| C7 | The content digest covers exactly the bytes cited |
+| C8 | A pack never mixes revisions |
+| C9 | A pack's taint is the propagation of its items' classes |
+| C10 | Every item names the snapshot it was retrieved from |
+
+| # | Decision | Rationale |
+|---|---|---|
+| 80 | `Cite` is the **only** constructor; `ContextItem` has unexported fields | This file is the boundary between what was indexed and what a model may see. Three fields are guarantees rather than data — disposition decides whether the path may be cited at all, provenance must not be able to default, and revision and snapshot must come from the index rather than from what the caller believed was current. A struct literal would let a retriever assert all three. |
+| 81 | Citing an excluded path fails as a **lookup miss**, and the message does not say why | A refusal that distinguished "excluded" from "absent" would be an existence oracle: a caller probing paths would learn which protected files a repository holds, which is the disclosure the exclusion was written to prevent. `TestSecurityRefusalDoesNotDistinguishExcludedFromAbsent` compares the two messages byte for byte. |
+| 82 | Provenance is **derived**, and `Request` has nowhere to put one | `taint.Class`'s zero value is `user_trusted` (decision 47). A caller-supplied field left unset would silently promote repository content — including any instructions inside it — to the most trusted class in the lattice, which is precisely how repository-authored text gets executed as though the user had typed it. |
+| 83 | A `reference` item cites the whole file and carries no digest | Modbit never read it, so it has no span to offer and no bytes to digest. Claiming either would be inventing evidence. This is what makes decision 43's third disposition coherent: the file stays citable without the index pretending to know its contents. |
+| 84 | Whole-file inclusion must justify itself; a span-limited item must not | RET-9 exists because whole-file inclusion is the largest consumer of a context budget and is invisible in the result — a whole file and a well-chosen span look identical to the model. Requiring the reason on one branch and refusing it on the other is what keeps `WholeFileInclusions()` a meaningful review list rather than a field everyone fills in. |
+| 85 | The content digest is taken **inside** `Cite`, over the bytes the caller says it cited | A caller-supplied digest can disagree with the content, and it would disagree exactly when something is wrong. Taking it here makes a citation revalidatable: a validator re-reading the file at this revision and span must arrive at this value. The content itself is never retained — a citation is metadata, and INV-4 keeps bodies out of metadata. |
+| 86 | Span carries lines **and** bytes | They answer different questions. Lines are what a person checks and a UI renders; bytes are what makes the region exact, since a line range says nothing about line endings or encoding and a digest over "lines 40–60" is not reproducible. |
+| 87 | `Pack` is where RET-8 is enforced, not `ContextItem` | A single item cannot mix revisions, so the requirement is unenforceable at item level. By the time items are serialized into a prompt it is too late to notice that two describe different branches — and it is silent precisely because an assembled prompt shows no revision at all. |
+| 88 | A mixed-revision pack names **both** revisions in the error | "These do not match" gives an operator nothing to act on. Both values are safe to show because a ref name is validated against `check-ref-format` at the boundary it enters through (decision 67), so it cannot be read here as anything but a name. The R-ERR-02 key allowlist rejected `field` and was right to: `expected_revision` and `actual_revision` are the keys that carry meaning. |
+| 89 | `Revision.Short()` never renders empty | A citation ending in a bare `@` reads as a truncation, which is the one thing evidence must not look like. A tree with no checkout says `unversioned` instead. |
+| 90 | C9 is tested in-package, because the public API cannot yet build a heterogeneous pack | Every item `Cite` produces is `repository_untrusted`, and `Propagate` over a homogeneous set is indistinguishable from "take the first item's class" — the mutation proving it survived the external test suite untouched. The case is not hypothetical: a DLP-flagged file is `known_secret` and an editor selection is `user_trusted`, and both are the moment a "take the first" implementation would under-report what a prompt carries. Testing it where it is reachable beats claiming an invariant nothing exercises. |
+
+**CTX-A01i bug fix**
+
+| # | Defect | Impact | Fix |
+|---|---|---|---|
+| B-12 | `TestCancellationOnAnAlreadyCompletedStreamIsInconclusive` failed roughly **1 run in 10** | Found by `make check` on unrelated work. The fake's `emit` runs in a goroutine, so a large `StreamBuffer` did not produce "already completed" — whether the terminal event landed before the suite cancelled was a race. The check then reported `pass` instead of `inconclusive`, which is the exact gap the test was written to close (a fast adapter that ignores cancellation shipping as verified). A conformance suite whose verdict depends on goroutine scheduling makes ADP-6 evidence nondeterministic, the same class as B-5. | `fake.CompleteBeforeReturn` emits the whole stream, terminal event included, before `Stream` returns, with the channel sized to the known event count so emitting inline cannot deadlock. Stable over 200 runs and 20 race-enabled suite runs; mutating the check still fails the test. |
 
 **CTX-A01g bug fix**
 

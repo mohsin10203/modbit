@@ -13,6 +13,9 @@ requirements:
   - PRD-v5.1-§9.3-CTX-3
   - PRD-v5.1-§9.3-CTX-4
   - PRD-v5.1-§9.3-CTX-12
+  - PRD-v5.1-§9.4-RET-6
+  - PRD-v5.1-§9.4-RET-8
+  - PRD-v5.1-§9.4-RET-9
   - PRD-v5.1-§20A.10-context-and-indexing
   - SDD-v5.1-§8-classification-filter
   - PRD-v5.1-§12A-TNT-1
@@ -62,6 +65,21 @@ tests:
   - pkg/index:TestSecurityLinkedWorktreeGitFileIsNotIndexed
   - pkg/index:TestLinkedWorktreeHasItsOwnHeadButSharedRefs
   - pkg/index:TestRevisionKeyPartitionsByWorktreeAndBranch
-  # Outstanding for the rest of CTX-A01: the OS change source (CTX-A01c2), lexical/vector/symbol
-  # indexes, branch and worktree awareness, and citations.
+  # Citations and context-item provenance (CTX-A01i). Cite is the boundary between what was indexed
+  # and what a model may see, so its refusals are part of this capability's contract, not a detail.
+  - pkg/index:TestSecurityAnExcludedPathCanNeverBeCited
+  - pkg/index:TestSecurityProtectedContentCannotBeCitedFromARealTree
+  - pkg/index:TestSecurityRefusalDoesNotDistinguishExcludedFromAbsent
+  - pkg/index:TestSecurityProvenanceIsDerivedNotSupplied
+  - pkg/index:TestSecurityACitationCarriesNoContentBody
+  - pkg/index:TestSecurityAPackCannotMixRevisions
+  - pkg/index:TestEveryRET6FieldIsRequired
+  - pkg/index:TestReferenceItemsCiteWholeFilesWithNoContent
+  - pkg/index:TestWholeFileInclusionMustRecordItsReason
+  - pkg/index:TestASpanMustLieInsideTheIndexedFile
+  - pkg/index:TestContentDigestCoversExactlyTheCitedBytes
+  - pkg/index:TestPackTaintIsPropagatedNotInherited
+  - pkg/index:TestEveryItemNamesItsSnapshotAndRevision
+  # Outstanding for the rest of CTX-A01: the OS change source (CTX-A01c2) and the lexical, vector,
+  # and symbol indexes.
   - conformance/context-classification

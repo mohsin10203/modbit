@@ -27,6 +27,7 @@ var (
 	IndexSnapshot      = Register("idxs", "Immutable index snapshot")
 	IndexShard         = Register("shrd", "Index shard")
 	ContextItem        = Register("citm", "Retrieved context item")
+	ContextPack        = Register("cpak", "Assembled context pack")
 	DependencyEdge     = Register("dep", "Dependency graph edge")
 
 	// CodeWiki.

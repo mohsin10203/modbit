@@ -252,6 +252,30 @@ func (r Revision) Equal(other Revision) bool {
 		r.Commit == other.Commit && r.Detached == other.Detached && r.Linked == other.Linked
 }
 
+// Short renders the revision the way a citation displays it.
+//
+// The commit is preferred over the branch because a branch moves and a citation must stay readable
+// against the state it was taken from. A tree with no checkout has neither, and says so rather than
+// rendering empty — a citation ending in "@" reads as a truncation, which is the one thing evidence
+// must not look like.
+func (r Revision) Short() string {
+	switch {
+	case r.Commit != "":
+		if len(r.Commit) > shortCommitLength {
+			return r.Commit[:shortCommitLength]
+		}
+		return r.Commit
+	case r.Branch != "":
+		return r.Branch
+	default:
+		return "unversioned"
+	}
+}
+
+// shortCommitLength is the abbreviation used in citations. Twelve rather than git's seven: seven
+// collides at monorepo scale, and a citation that names the wrong commit is worse than a long one.
+const shortCommitLength = 12
+
 // readGitDirFile parses the `gitdir:` pointer a linked worktree's `.git` file contains.
 func readGitDirFile(name, root string) (string, error) {
 	contents, err := readTrimmed(name, maxHeadFileBytes)
