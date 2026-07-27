@@ -276,7 +276,8 @@ The resolution is the port pattern the repository already uses for pgvector and 
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
 | CTX-A01d2 | Native lexical engine behind the port (Tantivy local / OpenSearch server) | CTX-5 | ⬜ Ready | Engine choice needs an ADR under R-ARCH-01: Tantivy is Rust, so it means cgo or a sidecar |
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
-| CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
+| CTX-A01f | Semantic index — `VectorIndex` port, `Embedder` port, model-scoped partitions, in-process cosine | CTX-5, RET-1 | ✅ Qualified | `pkg/index/vector.go`, 14 tests; V1–V8 and V10 mutation-verified, V9 documented as structural |
+| CTX-A01f2 | pgvector/HNSW behind the port | CTX-5 | ⬜ Ready | Datastore choice needs an ADR under R-ARCH-01 |
 | CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ✅ Qualified | `pkg/index/worktree.go`, 26 assertions incl. ref-name and partition-key security suites |
 | CTX-A01h | Immutable index snapshots recording source revision, indexer version, policy version | CTX-8, CTX-9 | ✅ Qualified | `pkg/index/snapshot.go`, 20 tests incl. tamper detection and partition scoping |
 | CTX-A01i | Citations and context-item provenance | RET-6, RET-8, RET-9 | ✅ Qualified | `pkg/index/citation.go`, 15 tests incl. 6 security suites; C1–C10 mutation-verified |
@@ -414,6 +415,39 @@ or OpenSearch adapter to inherit from its engine.
 | 104 | BM25 `k1`/`b` are constants, not settings | A ranking-model detail with no operator-meaningful interpretation. Exposing it would invite tuning that RET-10's benchmark, not a preference, should drive. |
 | 105 | One unreadable file does not abort the batch | Aborting would leave every later file unindexed too, turning one missing document into an arbitrary number the caller cannot enumerate. The batch completes and the shortfall returns `MODBIT_CONTEXT_DEGRADED` carrying the channel, not the paths — a path is itself information (decision 78). |
 | 106 | A file that chunks to nothing is **retracted** | An edit that empties a file must not leave its old text searchable. This is decision 57 applied to the lexical channel. |
+
+**CTX-A01f vector protocol (V1–V10)**
+
+CTX-5's semantic channel and RET-1's `ann` term. Same port pattern; dev-06 places pgvector with HNSW
+behind it, which is a datastore choice and therefore an ADR under R-ARCH-01.
+
+| # | Invariant |
+|---|---|
+| V1 | A vector indexed for one revision is never returned to a query on another |
+| V2 | Vectors from one embedding model are never compared against another's |
+| V3 | Only indexable content is embedded; `Chunk` is the gate |
+| V4 | A removed path never appears in a later result |
+| V5 | Re-indexing a path replaces its vectors rather than accumulating them |
+| V6 | Ranking is deterministic |
+| V7 | Every match carries the path and span a citation needs |
+| V8 | A vector of the wrong width or of zero magnitude is refused, never coerced |
+| V9 | The index holds vectors and locations, never text |
+| V10 | The index never contacts a provider; embedding is the gateway's job |
+
+V1–V8 and V10 are mutation-verified. **V9 is not, and says so**: `Match` has no field to put text in,
+so its test cannot fail against this implementation. It is kept for the pgvector adapter, where the
+row being selected from does hold the chunk and returning it would be one column away.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 107 | A partition is keyed by revision **and embedding model** | Two models place the same text at different coordinates, so a cosine between them is meaningless — and, worse, plausible-looking. dev-06 calls re-embedding on model change a versioned rebuild (SDD §17, UPG-6). The model string carries the provider's revision too, because MOD-A01 decision 18 exists precisely because providers roll models silently. |
+| 108 | `Embedder` is a port, and the package is **proved** unable to reach the network | Embedding is egress of repository content, so dev-06 routes it through the Model Gateway for the credential boundary (INV-2), DLP (INV-3), and cost metering. A port is only worth having if nothing can go around it, and the way it gets gone around is somebody adding an HTTP client for one urgent case. `TestSecurityIndexPackageCannotReachTheNetwork` walks the transitive dependency set and fails on `net/http`, `crypto/tls`, `os/exec`, and the gateway and inference packages. This package is also the one component that opens every file in a repository, which is the difference between a network capability being a bug and being an exfiltration primitive. |
+| 109 | Vectors are normalized **on admission**, and a zero-magnitude one is refused | Normalizing on the way in is what makes a dot product a cosine, so every comparison is on one scale regardless of what a provider returned. A zero vector has no direction: its similarity to everything is zero, so it would sit in the index as a document that silently never matches. NaN and infinity are refused for the stronger version of the same reason — one NaN turns the whole partition's ordering into nonsense. |
+| 110 | A batch containing one bad vector is refused **whole** | Normalization happens before the lock and before any mutation. A half-applied batch would be double-indexed by the retry that follows it. |
+| 111 | Vector width is fixed by the first vector and enforced after | Coercing — truncating or zero-padding — yields a cosine that is arithmetically valid and semantically meaningless, which is the failure mode nobody notices. |
+| 112 | Brute-force scan, not an approximate index | dev-06 specifies HNSW, which is what pgvector brings. Exhaustive scan is the honest floor: correct at every size, fast enough for one repository, and never pretending to be an ANN structure it is not. Recall is 100% by construction, which also makes it the reference an approximate index is measured against (RET-10). |
+| 113 | The embedder is called once per **file**, not once per chunk | A provider round trip per chunk would make indexing a repository a per-chunk billing event. |
+| 114 | A vector-count mismatch from a provider is refused | Returning fewer vectors than texts would pair each chunk with a neighbour's embedding: every result subtly wrong, nothing failing. |
 
 **CTX-A01i citation protocol (C1–C10)**
 

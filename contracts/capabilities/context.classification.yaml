@@ -101,6 +101,22 @@ tests:
   - pkg/index:TestApplyChangeSetIndexesUpsertsAndDropsRemovals
   - pkg/index:TestApplyChangeSetRetractsAFileThatBecameEmpty
   - pkg/index:TestChunksTileTheFileWithExactSpans
+  # Semantic channel (CTX-A01f). The network-boundary guard is part of this capability's contract:
+  # embedding is egress of repository content and must route through the Model Gateway.
+  - pkg/index:TestSecurityIndexPackageCannotReachTheNetwork
+  - pkg/index:TestSecurityVectorResultsNeverCrossRevisions
+  - pkg/index:TestSecurityVectorsFromDifferentModelsAreNeverCompared
+  - pkg/index:TestSecurityExcludedContentIsNeverEmbedded
+  - pkg/index:TestSecurityVectorIndexRetainsNoText
+  - pkg/index:TestVectorRemovalDropsEveryVectorForAPath
+  - pkg/index:TestReindexingAPathReplacesItsVectors
+  - pkg/index:TestVectorRankingIsIndependentOfInsertionOrder
+  - pkg/index:TestVectorMatchesCarryASpanACitationCanUse
+  - pkg/index:TestMalformedVectorsAreRefusedNotCoerced
+  - pkg/index:TestABatchWithOneBadVectorIsRefusedWhole
+  - pkg/index:TestEmbedChangeSetIndexesUpsertsAndDropsRemovals
+  - pkg/index:TestEmbeddingFailureSurfacesAsAVisibleDegradation
+  - pkg/index:TestAVectorCountMismatchIsRefused
   # Outstanding for the rest of CTX-A01: native change sources per platform (CTX-A01c3-c5), a native
-  # lexical engine behind the port (CTX-A01d2), and the symbol and vector indexes.
+  # lexical engine (CTX-A01d2), pgvector behind the vector port (CTX-A01f2), and symbol extraction.
   - conformance/context-classification
