@@ -318,7 +318,10 @@ func TestCancellationOnAnAlreadyCompletedStreamIsInconclusive(t *testing.T) {
 	model := fullModel()
 	a := conformantAdapter(model)
 	a.Latency = 0
-	a.StreamBuffer = 32 // every delta lands before the suite cancels
+	// The whole stream, terminal event included, exists before Stream returns. A large StreamBuffer
+	// was not enough: emit ran in a goroutine, so whether it reached the terminal event before the
+	// suite cancelled was a race, and the test reported pass roughly one run in ten.
+	a.CompleteBeforeReturn = true
 
 	report := run(t, a, model)
 	res := statusOf(t, report, "cancellation")

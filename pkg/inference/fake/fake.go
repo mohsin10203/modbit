@@ -81,6 +81,13 @@ type Adapter struct {
 	// was already fully received, so the adapter emits every delta without ever blocking — and a
 	// cancellation arriving afterwards has nothing left to interrupt.
 	StreamBuffer int
+	// CompleteBeforeReturn emits the whole stream, terminal event included, before Stream returns.
+	//
+	// A large StreamBuffer alone does not produce that state: emit runs in a goroutine, so whether
+	// it finished before the caller cancels is a race, and a test that depends on it is flaky by
+	// construction. This models the same provider shape — a response fully received and decoded
+	// before the client reads a byte — with the timing pinned rather than hoped for.
+	CompleteBeforeReturn bool
 	// Faults breaks specific contract properties.
 	Faults Faults
 
@@ -319,9 +326,23 @@ func (a *Adapter) Stream(ctx context.Context, req inference.Request, model infer
 		losses = nil
 	}
 
+	if a.CompleteBeforeReturn {
+		// The buffer must hold every event, or emitting inline deadlocks against a reader that does
+		// not exist yet. The count is bounded and known, so it is computed rather than guessed.
+		events := make(chan inference.StreamEvent, a.maxEvents(req))
+		a.emit(ctx, req, model, losses, events)
+		return events, nil
+	}
+
 	events := make(chan inference.StreamEvent, a.StreamBuffer)
 	go a.emit(ctx, req, model, losses, events)
 	return events, nil
+}
+
+// maxEvents bounds the events emit can produce for req: a start, one delta per word, one per
+// applicable tool call, and a terminal event.
+func (a *Adapter) maxEvents(req inference.Request) int {
+	return 2 + len(strings.Fields(a.Reply)) + len(a.applicableToolCalls(req))
 }
 
 // emit produces the stream. It owns the channel and closes it on every exit path unless the
