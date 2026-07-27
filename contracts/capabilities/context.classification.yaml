@@ -51,6 +51,10 @@ tests:
   - pkg/index:TestSecurityWalkDoesNotOpenIrregularFiles
   - pkg/index:TestIndexingIgnoreYieldsReferenceNotExclusion
   - pkg/index:TestGlobFormsAgreeWithGlobSemantics
-  # Outstanding for the rest of CTX-A01: the file watcher, lexical/vector/symbol indexes, branch and
-  # worktree awareness, and citations.
+  - pkg/index:TestSecurityAddingAnIgnoreRuleRetractsIndexedContent
+  - pkg/index:TestPathsOutsideTheScannedScopeAreNotTreatedAsDeleted
+  - pkg/index:TestRescanRecoversFromDroppedNotifications
+  - pkg/index:TestFlushPolicyCapsTheDebounceSoEditsCannotStarveTheIndex
+  # Outstanding for the rest of CTX-A01: the OS change source (CTX-A01c2), lexical/vector/symbol
+  # indexes, branch and worktree awareness, and citations.
   - conformance/context-classification

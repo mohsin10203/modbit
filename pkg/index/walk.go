@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/modbit/modbit/pkg/modberr"
@@ -47,6 +48,9 @@ const (
 	DiagFileUnreadable = "file_unreadable"
 	// DiagDepthExceeded means a subtree was pruned at defaultMaxDepth.
 	DiagDepthExceeded = "depth_exceeded"
+	// DiagAncestorExcluded means a scoped rescan could not run because a directory above it is
+	// excluded or unreadable.
+	DiagAncestorExcluded = "ancestor_excluded"
 )
 
 // Entry is one classified path produced by a walk.
@@ -58,6 +62,9 @@ type Entry struct {
 	Decision
 	Size    int64
 	ModTime time.Time
+	// IsDir marks a directory. Only excluded directories are reported, and an incremental reindex
+	// needs to tell one from a file: retracting a directory retracts everything beneath it.
+	IsDir bool
 }
 
 // Diagnostic records something a walk could not do.
@@ -175,8 +182,108 @@ func (w *Walker) Walk(ctx context.Context, visit func(Entry) error) (Report, err
 			WithDetail("field", "visit")
 	}
 	rep := &Report{}
-	err := w.walkDir(ctx, frame{abs: w.root, classifier: w.classifier}, rep, visit)
+	err := w.scanDir(ctx, frame{abs: w.root, classifier: w.classifier}, rep, visit, true)
 	return *rep, err
+}
+
+// WalkSubtree walks one directory and everything beneath it, as Walk would have.
+//
+// The ignore rules governing the subtree are rebuilt from the root down, so a rescan reaches the
+// same verdict a full walk would. That equivalence is the point: an incremental reindex that
+// resolved rules differently from the initial index would drift from it, and the drift would show
+// up as content that is retrievable only because nothing has revisited it.
+//
+// rel is repository relative. The empty path is the whole tree.
+func (w *Walker) WalkSubtree(ctx context.Context, rel string, visit func(Entry) error) (Report, error) {
+	return w.walkScoped(ctx, rel, visit, true)
+}
+
+// WalkDirectory walks a single directory's own entries without descending.
+//
+// It is the cheap case for an incremental reindex: an edited file changes what its own directory
+// contains and nothing else, so rescanning the subtree beneath it would be work with no possible
+// effect.
+func (w *Walker) WalkDirectory(ctx context.Context, rel string, visit func(Entry) error) (Report, error) {
+	return w.walkScoped(ctx, rel, visit, false)
+}
+
+func (w *Walker) walkScoped(ctx context.Context, rel string, visit func(Entry) error, recursive bool) (Report, error) {
+	if visit == nil {
+		return Report{}, modberr.New(modberr.CodeInvalidArgument, "walk requires a visit function").
+			WithDetail("field", "visit")
+	}
+	rel = normalizePath(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return Report{}, modberr.New(modberr.CodeInvalidArgument, "walk path escapes the tree").
+			WithDetail("field", "rel")
+	}
+
+	rep := &Report{}
+	if rel == "" || rel == "." {
+		err := w.scanDir(ctx, frame{abs: w.root, classifier: w.classifier}, rep, visit, recursive)
+		return *rep, err
+	}
+
+	parent, ok := w.resolveParent(path.Dir(rel), rep)
+	if !ok {
+		// resolveParent has recorded why. The subtree contributes nothing this pass; a caller
+		// holding prior state keeps it rather than treating an unreadable ancestor as a deletion.
+		return *rep, nil
+	}
+	name := path.Base(rel)
+	target := frame{
+		abs:        filepath.Join(parent.abs, name),
+		rel:        rel,
+		depth:      parent.depth + 1,
+		classifier: parent.classifier,
+		patterns:   parent.patterns,
+	}
+	err := w.scanSubdir(ctx, target, name, rep, visit, recursive)
+	return *rep, err
+}
+
+// resolveParent rebuilds the ignore rules in force for a directory by reading every ancestor's
+// ignore files, root first.
+//
+// ok=false means the directory is not reachable under the current rules — an ancestor is excluded,
+// unreadable, or carries an ignore file that could not be honoured. Each case is diagnosed.
+func (w *Walker) resolveParent(dir string, rep *Report) (frame, bool) {
+	var names []string
+	if dir != "" && dir != "." {
+		names = strings.Split(dir, "/")
+	}
+
+	fr := frame{abs: w.root, classifier: w.classifier}
+	for i := 0; ; i++ {
+		entries, err := os.ReadDir(fr.abs)
+		if err != nil {
+			w.diagnose(rep, fr.rel, DiagDirectoryUnreadable, "directory could not be listed")
+			return frame{}, false
+		}
+		classifier, patterns, ok := w.loadIgnoreFiles(fr, entries, rep)
+		if !ok {
+			return frame{}, false
+		}
+		fr.classifier, fr.patterns = classifier, patterns
+
+		if i == len(names) {
+			return fr, true
+		}
+		next := frame{
+			abs:        filepath.Join(fr.abs, names[i]),
+			rel:        path.Join(fr.rel, names[i]),
+			depth:      fr.depth + 1,
+			classifier: classifier,
+			patterns:   patterns,
+		}
+		if slices.Contains(vcsMetadataDirs, names[i]) ||
+			classifier.Classify(File{Path: next.rel, IsDir: true}).Disposition == DispositionExclude {
+			w.diagnose(rep, next.rel, DiagAncestorExcluded,
+				"an ancestor directory is excluded from indexing")
+			return frame{}, false
+		}
+		fr = next
+	}
 }
 
 // frame is one directory's traversal state.
@@ -193,7 +300,9 @@ type frame struct {
 	patterns []Pattern
 }
 
-func (w *Walker) walkDir(ctx context.Context, fr frame, rep *Report, visit func(Entry) error) error {
+// scanDir lists one directory, applies its ignore files, and classifies its entries. It descends
+// into subdirectories only when recursive.
+func (w *Walker) scanDir(ctx context.Context, fr frame, rep *Report, visit func(Entry) error, recursive bool) error {
 	// Checked per directory rather than per entry: a cancelled walk should stop promptly without
 	// paying for a context read on every file in a monorepo (R-GO-01).
 	if err := ctx.Err(); err != nil {
@@ -225,7 +334,10 @@ func (w *Walker) walkDir(ctx context.Context, fr frame, rep *Report, visit func(
 		child.abs = filepath.Join(fr.abs, entry.Name())
 
 		if entry.IsDir() {
-			if err := w.walkSubdir(ctx, child, entry.Name(), rep, visit); err != nil {
+			if !recursive {
+				continue
+			}
+			if err := w.scanSubdir(ctx, child, entry.Name(), rep, visit, true); err != nil {
 				return err
 			}
 			continue
@@ -237,12 +349,12 @@ func (w *Walker) walkDir(ctx context.Context, fr frame, rep *Report, visit func(
 	return nil
 }
 
-// walkSubdir classifies a directory and descends into it unless it is excluded.
-func (w *Walker) walkSubdir(ctx context.Context, fr frame, name string, rep *Report, visit func(Entry) error) error {
+// scanSubdir classifies a directory and, when recursive, descends into it unless it is excluded.
+func (w *Walker) scanSubdir(ctx context.Context, fr frame, name string, rep *Report, visit func(Entry) error, recursive bool) error {
 	if slices.Contains(vcsMetadataDirs, name) {
 		rep.Stats.Pruned++
 		rep.Stats.Excluded++
-		return visit(Entry{Decision: Decision{
+		return visit(Entry{IsDir: true, Decision: Decision{
 			Path:        fr.rel,
 			Disposition: DispositionExclude,
 			Reason:      ReasonVCSMetadata,
@@ -255,7 +367,7 @@ func (w *Walker) walkSubdir(ctx context.Context, fr frame, name string, rep *Rep
 	if d.Disposition == DispositionExclude {
 		rep.Stats.Pruned++
 		rep.Stats.Excluded++
-		return visit(Entry{Decision: d})
+		return visit(Entry{Decision: d, IsDir: true})
 	}
 	if fr.depth > w.opts.MaxDepth {
 		w.diagnose(rep, fr.rel, DiagDepthExceeded, "subtree exceeds the maximum indexing depth")
@@ -264,7 +376,7 @@ func (w *Walker) walkSubdir(ctx context.Context, fr frame, name string, rep *Rep
 	}
 	// A directory held at DispositionReference by `.modbitindexingignore` is still traversed: that
 	// file withholds content from the indexes, it does not hide the tree.
-	return w.walkDir(ctx, fr, rep, visit)
+	return w.scanDir(ctx, fr, rep, visit, recursive)
 }
 
 // walkFile classifies a single non-directory entry.

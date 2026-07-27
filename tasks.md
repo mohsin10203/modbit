@@ -249,7 +249,8 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 |---|---|---|---|---|
 | CTX-A01a | Ignore/classification filter — gitignore-compatible matching, hierarchical sources, protected paths, binary/generated/size classification, provenance assignment | CTX-4, CTX-12, TNT-1 | ✅ Qualified | `pkg/index`, 38 assertions |
 | CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ✅ Qualified | `pkg/index/walk.go`, 19 tests incl. 4 security suites |
-| CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | ⬜ Ready | |
+| CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | 🚧 In Progress | `pkg/index/reindex.go`, 17 tests. Reindex engine, scoped rescan, and flush policy Qualified; the OS change source is outstanding — see below |
+| CTX-A01c2 | OS change source feeding `Reindexer.Observe` (FSEvents/inotify/ReadDirectoryChangesW), incl. queue-overflow → `Rescan` | CTX-2 | ⛔ Blocked | Needs a dependency decision: `fsnotify` is the standard Go choice but would be the repository's second direct dependency (R-GO-09, R-ARCH-01). Not adopted unilaterally |
 | CTX-A01d | Lexical index (Tantivy-class) | CTX-5 | ⬜ Ready | |
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
 | CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
@@ -280,6 +281,19 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 | 53 | Irregular files are excluded from the directory entry, before any open | Opening a FIFO blocks until a writer appears. Any contributor can commit one, so an indexer that opened whatever it found would hang on a path chosen by someone else. |
 | 54 | `.git`, `.hg`, `.svn`, `.bzr` are pruned by name | None of it is source, it dwarfs the tree it sits in, and `.git/config` routinely carries a remote URL with an embedded token — indexing one would put a credential into a retrievable index (INV-11). |
 | 55 | Walk limits (depth, ignore-file size, diagnostics) are constants, not settings | None is a policy choice. A tree that trips one is malformed or hostile, not merely large, and making them configurable would only offer an operator a way to turn a bound off. |
+
+**CTX-A01c decisions**
+
+| # | Decision | Rationale |
+|---|---|---|
+| 56 | Rescan scope is derived from *what changed*: a file rescans its directory shallowly, an ignore file or a directory rescans a subtree | An edited file cannot affect any listing but its own directory's, so a subtree walk would be work with no possible effect. An ignore file changes every verdict beneath it. A notification naming a directory says nothing about what appeared inside it, so a shallow parent scan would leave a newly created tree unindexed until something else forced a rescan. |
+| 57 | A newly excluded path is a **removal**, never an upsert | This is CTX-4 applied to an index that already exists. A rule that only stopped *future* indexing would leave the content it names retrievable indefinitely — the same disclosure the rule was written to prevent. `TestSecurityAddingAnIgnoreRuleRetractsIndexedContent` covers both shapes: a file excluded by pattern, which the rescan still sees, and a subtree under a newly excluded directory, which it no longer reaches. |
+| 58 | A path outside the scanned scopes is never concluded missing | Absence from a scan that never looked is not evidence of deletion. Treating it as one is how an incremental reindex silently empties an index; `inScopes` makes the distinction explicit and two tests pin it. |
+| 59 | Retraction is driven by what a scan **observed**, never by what a notification claimed | A removal notification for a directory that still exists would otherwise retract its whole subtree. The state cannot distinguish "was a directory" from "never seen" — an included directory is never reported on its own — so a removal rescans the parent in full unless the state positively says the path was a file. |
+| 60 | The flush deadline is the **earlier** of the debounce and a max-delay cap | A debounce alone never fires while edits keep arriving, so continuous typing would hold the index at the last quiet moment: stale, with nothing to show it. The cap (3s, against the 10s p95 SLO in PRD §7) bounds the wait regardless of activity and leaves room for the rescan and index write. |
+| 61 | `Observe` never blocks on a flush | A watcher stalled behind a rescan lets the operating system's own notification queue overflow, which costs notifications outright. Scans run without the lock; a change landing mid-scan stays pending for the next flush, which the freshness budget accounts for. |
+| 62 | `Flush` before an initial `Rescan` is an error, not an empty index | Applying deltas to a state that was never established would record a tree consisting of whatever happened to change, and report it as an index. |
+| 63 | `ChangeSet.FullRescan` marks recovery explicitly | A watcher that dropped notifications leaves the reindexer diverged from the tree with nothing to reveal it. Recovery is a full walk, and the flag is what stops a consumer from mistaking it for an ordinary delta (SDD §15: index failures degrade visibly). |
 
 **CTX-A01b bug fixes**
 
