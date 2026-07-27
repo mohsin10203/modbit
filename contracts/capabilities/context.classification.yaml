@@ -42,6 +42,15 @@ tests:
   - pkg/index:TestProtectedPathsOutrankEveryOtherRule
   - pkg/index:TestRepositoryContentIsClassifiedUntrusted
   - pkg/index:TestGitignoreIsHonouredOnlyWhenPolicyAllows
-  # Outstanding for the rest of CTX-A01: hierarchical ignore discovery over a real tree, the file
-  # watcher, lexical/vector/symbol indexes, branch and worktree awareness, and citations.
+  - pkg/index:TestWalkDiscoversIgnoreFilesHierarchically
+  - pkg/index:TestWalkPrunesExcludedDirectoriesInsteadOfDescending
+  - pkg/index:TestWalkFailsClosedOnAnUnreadableIgnoreFile
+  - pkg/index:TestSecurityWalkNeverFollowsSymlinks
+  - pkg/index:TestSecurityModbitIgnoredFilesAreNeverOpened
+  - pkg/index:TestSecurityWalkPrunesVersionControlMetadata
+  - pkg/index:TestSecurityWalkDoesNotOpenIrregularFiles
+  - pkg/index:TestIndexingIgnoreYieldsReferenceNotExclusion
+  - pkg/index:TestGlobFormsAgreeWithGlobSemantics
+  # Outstanding for the rest of CTX-A01: the file watcher, lexical/vector/symbol indexes, branch and
+  # worktree awareness, and citations.
   - conformance/context-classification

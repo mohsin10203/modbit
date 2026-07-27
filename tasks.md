@@ -248,7 +248,7 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
 | CTX-A01a | Ignore/classification filter — gitignore-compatible matching, hierarchical sources, protected paths, binary/generated/size classification, provenance assignment | CTX-4, CTX-12, TNT-1 | ✅ Qualified | `pkg/index`, 38 assertions |
-| CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ⬜ Ready | pattern layer done; the walker is not |
+| CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ✅ Qualified | `pkg/index/walk.go`, 19 tests incl. 4 security suites |
 | CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | ⬜ Ready | |
 | CTX-A01d | Lexical index (Tantivy-class) | CTX-5 | ⬜ Ready | |
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
@@ -267,6 +267,28 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 | 45 | `.gitignore` is honoured only when policy says so; `.modbitignore` always applies | A repository's build exclusions are not necessarily its indexing exclusions. Modbit's own ignore files are not subject to that switch. |
 | 46 | The classifier receives a byte **prefix**, never a reader or a path to open | Keeps it pure and makes CTX-12 structural: it cannot execute repository code because it never holds a handle to anything. |
 | 47 | Provenance is assigned even on excluded files | A zero-valued `taint.Class` reads as `user_trusted`. A later decision must never see an unset class on repository content. |
+
+**CTX-A01b decisions**
+
+| # | Decision | Rationale |
+|---|---|---|
+| 48 | An excluded directory is **pruned**, not walked and filtered | This is what makes CTX-4's "excluded *before* indexing" true of the filesystem rather than only of the decision record. Content in a pruned subtree is never listed, never opened, and never read. It is also the difference between one entry and several million for a `node_modules`. |
+| 49 | The walk reports directories only when they are **excluded** | A pruned subtree collapses into the single line that explains it, which is exactly what the context health view needs to answer "why is this file missing". Reporting included directories would bury that line under the tree it describes. |
+| 50 | Classification is split into a path phase and a content phase | `.modbitignore` means Modbit does not read the file. A classifier that demanded a byte prefix up front made that unenforceable — the bytes were already read by the time the rule was consulted. `TestSecurityModbitIgnoredFilesAreNeverOpened` proves it by making the file unreadable: an attempted open would have produced a diagnostic. |
+| 51 | An unreadable or oversized ignore file **prunes its subtree** | An ignore file Modbit cannot read is an instruction Modbit cannot follow. Indexing the subtree under whichever rules happened to be readable would index precisely the content that file existed to withhold. Failing the whole walk instead would let one unreadable directory deny the user an index of the repository, so the loss is scoped to the subtree and recorded as a diagnostic (R-ERR-05). |
+| 52 | Symbolic links are recorded and never resolved | A link committed to the repository would otherwise pull arbitrary filesystem content in under a repository-relative path — a path the protected list was never written to cover, since that list describes a repository's layout, not the machine's. Excluding rather than referencing keeps a later stage from resolving the path on the index's authority. |
+| 53 | Irregular files are excluded from the directory entry, before any open | Opening a FIFO blocks until a writer appears. Any contributor can commit one, so an indexer that opened whatever it found would hang on a path chosen by someone else. |
+| 54 | `.git`, `.hg`, `.svn`, `.bzr` are pruned by name | None of it is source, it dwarfs the tree it sits in, and `.git/config` routinely carries a remote URL with an embedded token — indexing one would put a credential into a retrievable index (INV-11). |
+| 55 | Walk limits (depth, ignore-file size, diagnostics) are constants, not settings | None is a policy choice. A tree that trips one is malformed or hostile, not merely large, and making them configurable would only offer an operator a way to turn a bound off. |
+
+**CTX-A01b bug fixes**
+
+| # | Bug | Why it mattered | Fix |
+|---|---|---|---|
+| B-7 | `.modbitindexingignore` produced `exclude`, identical to `.modbitignore` | The two files exist precisely to be different: one withholds content from the indexes, the other withholds it from Modbit entirely. Collapsing them made a large fixture invisible to a user who knew it was there, and made decision 43's third disposition unreachable from an ignore file. | The disposition is now chosen by source; `TestIndexingIgnoreYieldsReferenceNotExclusion` pins it. |
+| B-8 | `NewClassifier` appended settings exclusions **into the caller's** `RuleSet` | Two classifiers built from one rule set applied every settings glob twice, and the walker had nothing to preserve across a per-directory rule swap. | Settings exclusions are held in their own set. `TestClassifierDoesNotMutateTheRuleSetItIsGiven` covers it. |
+| B-9 | `IgnoreFileNames` was a **map**, so the order the three ignore files applied in was random | Resolution is last-match-wins, so map iteration order decided which file won when two disagreed — a repository could get different indexing decisions on consecutive runs. | Replaced by the ordered `IgnoreFiles` slice; the order is now documented as contract. |
+| B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
 | QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | ⬜ Proposed |
 

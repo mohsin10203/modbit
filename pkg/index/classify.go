@@ -37,6 +37,12 @@ const (
 	ReasonBinary            = "binary"
 	ReasonGenerated         = "generated"
 	ReasonEmpty             = "empty"
+	// ReasonSymlink marks a symbolic link. A walk records the link but never resolves it.
+	ReasonSymlink = "symlink"
+	// ReasonNotRegular marks a FIFO, socket, or device node found in the tree.
+	ReasonNotRegular = "not_regular"
+	// ReasonVCSMetadata marks a version-control directory such as `.git`.
+	ReasonVCSMetadata = "vcs_metadata"
 )
 
 // Decision is the classifier's verdict for one file.
@@ -139,8 +145,11 @@ func ConfigFromSnapshot(snap settings.Snapshot) (Config, error) {
 //
 // It holds no per-file state and is safe for concurrent use across an indexing fan-out.
 type Classifier struct {
-	config    Config
+	config Config
+	// rules are the ignore patterns discovered in the tree. A hierarchical walk replaces them per
+	// directory through WithRules; the other two sets are fixed for the classifier's lifetime.
 	rules     *RuleSet
+	settings  *RuleSet
 	protected *RuleSet
 }
 
@@ -165,12 +174,32 @@ func NewClassifier(config Config, rules *RuleSet) (*Classifier, error) {
 		}
 		protected.Add(parsed)
 	}
+	// Settings exclusions are held apart from the discovered rules rather than appended to them.
+	// Appending mutated the caller's rule set, which double-applied the globs when one set was used
+	// to build two classifiers, and it left nothing for WithRules to preserve across a walk.
+	settingsRules := NewRuleSet(nil)
 	for _, g := range config.ExcludedGlobs {
 		if parsed, ok := ParsePattern(g, "", SourceSettings); ok {
-			rules.Add(parsed)
+			settingsRules.Add(parsed)
 		}
 	}
-	return &Classifier{config: config, rules: rules, protected: protected}, nil
+	return &Classifier{config: config, rules: rules, settings: settingsRules, protected: protected}, nil
+}
+
+// WithRules returns a copy of the classifier that resolves ignore patterns against rules, keeping
+// the same configuration, settings exclusions, and protected paths.
+//
+// A hierarchical walk needs a classifier per directory, because a nested ignore file governs only
+// its own subtree. Rebuilding the classifier outright would re-parse the protected list once per
+// directory of a monorepo; sharing the compiled sets makes the per-directory cost the single
+// allocation this returns. The copy is independent of the receiver and safe for concurrent use.
+func (c *Classifier) WithRules(rules *RuleSet) *Classifier {
+	if rules == nil {
+		rules = NewRuleSet(nil)
+	}
+	out := *c
+	out.rules = rules
+	return &out
 }
 
 // File is the metadata the classifier needs about one candidate.
@@ -197,6 +226,22 @@ type File struct {
 // could re-include a private key, and the whole point of the protected list is that nothing in the
 // repository can override it.
 func (c *Classifier) Classify(f File) Decision {
+	d, decided := c.classifyPath(f)
+	if decided {
+		return d
+	}
+	return c.classifyContents(d, f.Contents)
+}
+
+// classifyPath applies every check that needs only the path, size, and kind of a file.
+//
+// It is separate from the content checks so that a caller walking a real tree can learn whether it
+// is permitted to open the file at all. `.modbitignore` means Modbit does not read the content,
+// and a classifier that demanded a byte prefix up front would have made that unenforceable: the
+// bytes would already have been read by the time the rule was consulted.
+//
+// decided=false means the path is admissible and the decision now depends on the content.
+func (c *Classifier) classifyPath(f File) (Decision, bool) {
 	normalized := normalizePath(f.Path)
 	d := Decision{Path: normalized, Provenance: taint.RepositoryUntrusted}
 
@@ -204,29 +249,39 @@ func (c *Classifier) Classify(f File) Decision {
 		d.Disposition = DispositionExclude
 		d.Reason = ReasonProtectedPath
 		d.Detail = v.Pattern.Raw
-		return d
+		return d, true
 	}
 
 	if v := c.rules.Match(normalized, f.IsDir); v.Ignored {
 		// A gitignore rule is honoured only when policy says to. The other ignore sources are
-		// Modbit's own and always apply.
-		if v.Pattern.Source == SourceGitignore && !c.config.RespectGitignore {
-			// Fall through: the repository's build exclusions are not its indexing exclusions here.
-		} else {
-			d.Disposition = DispositionExclude
+		// Modbit's own and always apply. Falling through leaves the repository's build exclusions
+		// without effect, which is the point of the setting.
+		if v.Pattern.Source != SourceGitignore || c.config.RespectGitignore {
 			d.Reason = ReasonIgnoreFile
-			if v.Pattern.Source == SourceSettings {
-				d.Reason = ReasonSettingsExclusion
-			}
 			d.Detail = string(v.Pattern.Source) + ":" + v.Pattern.Raw
-			return d
+			// `.modbitindexingignore` withholds a file from the indexes without hiding it: it stays
+			// readable on request and citable by path. The other sources remove it outright. That
+			// distinction is the whole reason the two files exist separately — collapsing it would
+			// make a large fixture invisible to a user who knows it is there.
+			d.Disposition = DispositionExclude
+			if v.Pattern.Source == SourceIndexingIgnore {
+				d.Disposition = DispositionReference
+			}
+			return d, true
 		}
+	}
+
+	if v := c.settings.Match(normalized, f.IsDir); v.Ignored {
+		d.Disposition = DispositionExclude
+		d.Reason = ReasonSettingsExclusion
+		d.Detail = string(v.Pattern.Source) + ":" + v.Pattern.Raw
+		return d, true
 	}
 
 	if f.IsDir {
 		d.Disposition = DispositionIndex
 		d.Reason = ReasonIncluded
-		return d
+		return d, true
 	}
 
 	if f.Size == 0 {
@@ -234,15 +289,20 @@ func (c *Classifier) Classify(f File) Decision {
 		// citable rather than disappearing.
 		d.Disposition = DispositionReference
 		d.Reason = ReasonEmpty
-		return d
+		return d, true
 	}
 	if f.Size > c.config.MaxFileBytes {
 		d.Disposition = DispositionReference
 		d.Reason = ReasonTooLarge
 		d.Detail = "exceeds context.indexing.max_file_bytes"
-		return d
+		return d, true
 	}
-	if isBinary(f.Contents) {
+	return d, false
+}
+
+// classifyContents completes a decision from the file's leading bytes.
+func (c *Classifier) classifyContents(d Decision, contents []byte) Decision {
+	if isBinary(contents) {
 		d.Disposition = DispositionReference
 		d.Reason = ReasonBinary
 		return d
@@ -250,7 +310,7 @@ func (c *Classifier) Classify(f File) Decision {
 
 	d.Disposition = DispositionIndex
 	d.Reason = ReasonIncluded
-	if isGenerated(f.Contents) {
+	if isGenerated(contents) {
 		d.Generated = true
 		d.Reason = ReasonGenerated
 	}

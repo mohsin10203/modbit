@@ -1,6 +1,7 @@
 package index_test
 
 import (
+	"path"
 	"strings"
 	"testing"
 
@@ -63,6 +64,58 @@ func TestGitignoreSemantics(t *testing.T) {
 			t.Parallel()
 			if got := r.Match(tc.path, tc.isDir).Ignored; got != tc.ignored {
 				t.Errorf("Match(%q, dir=%t) = %t, want %t — %s", tc.path, tc.isDir, got, tc.ignored, tc.why)
+			}
+		})
+	}
+}
+
+// Matching classifies each pattern segment at parse time and sends literals and `*.ext` globs down
+// fast paths that skip path.Match entirely. Those paths carry the bulk of real ignore files, so a
+// divergence from glob semantics would be both silent and widespread.
+func TestGlobFormsAgreeWithGlobSemantics(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		pattern string
+		path    string
+		match   bool
+	}{
+		// Literal segments.
+		{"node_modules", "node_modules", true},
+		{"node_modules", "node_modules2", false},
+		{"node_modules", "node_module", false},
+		// The `*rest` form.
+		{"*.pem", "server.pem", true},
+		{"*.pem", ".pem", true},
+		{"*.pem", "server.pem.bak", false},
+		{"*.pem", "pem", false},
+		{"*", "anything", true},
+		{"*", "", true},
+		// Forms that must still reach path.Match.
+		{"file?.go", "file1.go", true},
+		{"file?.go", "file12.go", false},
+		{"[abc].go", "b.go", true},
+		{"[abc].go", "d.go", false},
+		{"v*.[0-9]", "v1.7", true},
+		{"*.tar.*", "a.tar.gz", true},
+		{"*.tar.*", "a.tar", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.pattern+"/"+tc.path, func(t *testing.T) {
+			t.Parallel()
+			p, ok := index.ParsePattern(tc.pattern, "", index.SourceGitignore)
+			if !ok {
+				t.Fatalf("ParsePattern(%q) produced no rule", tc.pattern)
+			}
+			// The reference: these are single-segment patterns, so glob matching is the contract.
+			want, err := path.Match(tc.pattern, tc.path)
+			if err != nil {
+				t.Fatalf("path.Match(%q, %q): %v", tc.pattern, tc.path, err)
+			}
+			if want != tc.match {
+				t.Fatalf("the case itself disagrees with path.Match: want %t, path.Match %t", tc.match, want)
+			}
+			if got := p.Match(tc.path, false); got != tc.match {
+				t.Errorf("Match(%q, %q) = %t, want %t", tc.pattern, tc.path, got, tc.match)
 			}
 		})
 	}
