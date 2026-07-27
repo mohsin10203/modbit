@@ -80,6 +80,16 @@ tests:
   - pkg/index:TestContentDigestCoversExactlyTheCitedBytes
   - pkg/index:TestPackTaintIsPropagatedNotInherited
   - pkg/index:TestEveryItemNamesItsSnapshotAndRevision
-  # Outstanding for the rest of CTX-A01: the OS change source (CTX-A01c2) and the lexical, vector,
-  # and symbol indexes.
+  # Watcher loop driving the reindexer from a change source (CTX-A01c2).
+  - pkg/index:TestWatcherRescansBeforeApplyingAnyDelta
+  - pkg/index:TestWatcherFlushesPendingChangesByTheDeadline
+  - pkg/index:TestWatcherResolvesALostBatchToAFullRescan
+  - pkg/index:TestWatcherCoalescesRepeatedLosses
+  - pkg/index:TestWatcherReadsTheSourceWhileScanning
+  - pkg/index:TestWatcherFlushesWhatItHasWhenTheSourceStops
+  - pkg/index:TestWatcherStopsOnCancellationAndClosesTheSourceOnce
+  - pkg/index:TestWatcherSurfacesAnApplyFailureInsteadOfContinuing
+  - pkg/index:TestPollSourceDrivesAWatcherEndToEnd
+  # Outstanding for the rest of CTX-A01: native change sources per platform (CTX-A01c3-c5) and the
+  # lexical, vector, and symbol indexes.
   - conformance/context-classification

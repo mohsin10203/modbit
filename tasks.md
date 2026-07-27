@@ -247,18 +247,32 @@ Capability registry entry: `contracts/capabilities/context.classification.yaml`.
 
 **Dependency posture (decided 2026-07-28).** Well-scoped third-party Go dependencies may be adopted
 for the indexing stack when they are the standard choice, each recorded as an ADR carrying the
-justification R-GO-09 requires. This unblocks `CTX-A01c2` (`fsnotify`) and applies to `CTX-A01e`
-(tree-sitter or per-language parsers). Two constraints survive it: a parser must not execute
-repository code (CTX-12), and a new datastore, transport, or runtime still needs an ADR under
-R-ARCH-01 rather than a dependency note. `go.mod` currently holds one direct dependency,
-`gopkg.in/yaml.v3`.
+justification R-GO-09 requires. Two constraints survive it: a parser must not execute repository
+code (CTX-12), and a new datastore, transport, or runtime still needs an ADR under R-ARCH-01 rather
+than a dependency note. `go.mod` still holds one direct dependency, `gopkg.in/yaml.v3`.
+
+**Why `fsnotify` was not adopted for `CTX-A01c2`.** It was the expected choice and it failed
+inspection. fsnotify's macOS backend is kqueue, and `watchDirectoryFiles` opens **a file descriptor
+per file**, not per directory — their README states it plainly and `backend_kqueue.go` confirms it.
+On the machine this was measured on, `kern.maxfilesperproc` is 10240, so fsnotify caps out at
+roughly ten thousand watched files on the primary developer platform, against a product that targets
+a 10M-file benchmark (MRS-01..04). Linux and Windows are fine; macOS is not, and macOS is where an
+IDE lives.
+
+The resolution is the port pattern the repository already uses for pgvector and Tantivy: define
+`ChangeSource`, ship a portable implementation now, and add native backends per platform as
+`CTX-A01c3`–`c5`. `go.mod` stays at one dependency, and the backend that macOS actually needs
+(FSEvents — recursive, one watch per tree) was never what fsnotify offered.
 
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
 | CTX-A01a | Ignore/classification filter — gitignore-compatible matching, hierarchical sources, protected paths, binary/generated/size classification, provenance assignment | CTX-4, CTX-12, TNT-1 | ✅ Qualified | `pkg/index`, 38 assertions |
 | CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ✅ Qualified | `pkg/index/walk.go`, 19 tests incl. 4 security suites |
-| CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | 🚧 In Progress | `pkg/index/reindex.go`, 17 tests. Reindex engine, scoped rescan, and flush policy Qualified; the OS change source is outstanding — see below |
-| CTX-A01c2 | OS change source feeding `Reindexer.Observe` (FSEvents/inotify/ReadDirectoryChangesW), incl. queue-overflow → `Rescan` | CTX-2 | ⬜ Ready | Unblocked 2026-07-28 by the dependency posture below: `fsnotify` may be adopted, with an ADR recording the justification R-GO-09 requires |
+| CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | ✅ Qualified | `pkg/index/reindex.go` + `watch.go`, 29 tests. Reindex engine, scoped rescan, flush policy, and the watcher loop are complete; native backends are tracked separately as CTX-A01c3–c5 |
+| CTX-A01c2 | `ChangeSource` port + `Watcher` driver + portable `PollSource`, incl. queue-overflow → `Rescan` | CTX-2 | ✅ Qualified | `pkg/index/watch.go`, 12 tests; W1–W8 mutation-verified |
+| CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | ⬜ Ready | Recursive, one watch per tree. The only backend that meets CTX-2 on a large tree on the primary developer platform — see the watcher dependency finding below |
+| CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
+| CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index (Tantivy-class) | CTX-5 | ⬜ Ready | |
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
 | CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
@@ -332,6 +346,38 @@ Requirements: CTX-8 (record source revision, indexer version, policy version), C
 | 77 | `Latest` is scoped to the revision's partition and skips corrupt snapshots | The newest snapshot in the directory may belong to another branch, and serving it is exactly the contamination CTX-3 forbids. A corrupt snapshot must not hide an intact older one — recovery is CTX-9's whole point. |
 | 78 | Excluded paths are **rejected** from a manifest, not filtered out | A path is itself information, which is why the classifier refuses to record excluded ones. A caller passing one has misunderstood what a manifest is, and silently dropping it would hide that. |
 | 79 | `**/.modbit/**` added to the shipped `excluded_globs` default | The snapshot store lives there. Indexing it would make each scan record the previous scan's output as repository content, growing without bound. The `union` merge on that setting means no scope can remove the exclusion. |
+
+**CTX-A01c2 watch protocol (W1–W8)**
+
+The `Reindexer` decides *what* an index update contains; the `Watcher` decides *when* one happens.
+The two failure modes differ: a wrong `ChangeSet` corrupts an index, while a late or lost
+notification leaves a correct index describing a tree that no longer exists. CTX-2 budgets the
+second (PRD §7: index freshness p95 under 10 seconds for local edits).
+
+Stated as numbered invariants in `pkg/index/watch.go`, one test each in `watch_test.go`. All eight
+were mutation-verified.
+
+| # | Invariant |
+|---|---|
+| W1 | Reading the source never blocks on a scan |
+| W2 | An initial `Rescan` precedes every flush |
+| W3 | A lost-notification batch resolves to a full `Rescan`, never to a delta |
+| W4 | Repeated losses coalesce into one `Rescan` |
+| W5 | Pending changes are flushed no later than the policy's deadline |
+| W6 | A source that stops ends the watch without losing already-observed changes |
+| W7 | Cancellation stops the watch and closes the source exactly once |
+| W8 | A scan failure surfaces; it is never swallowed to keep the loop alive |
+
+| # | Decision | Rationale |
+|---|---|---|
+| 91 | The platform layer is a **port**, not a dependency choice | The three operating systems differ enough that the only portable contract is "deliver what you saw, and say so when you could not see". That contract is also what let W1–W8 be tested against a controllable fake rather than against an operating system, which is the difference between a test suite and a flake generator. |
+| 92 | Observed changes and lost notifications are **one type**, not two paths | A source signalling loss through a separate channel would let a consumer handle changes and ignore losses. That is the divergence CTX-2's recovery path exists to prevent, so the type makes ignoring it impossible. |
+| 93 | The reader runs in its own goroutine | Decision 61 said `Observe` must never block on a flush; this is what makes it true end to end. A watcher stalled mid-scan stops draining the operating system's queue, and an overflowed queue costs notifications outright — the recovery path provoking the very failure it recovers from. |
+| 94 | The rescan signal is buffered to **one**, and the send is non-blocking | Eight dropped-notification reports are one divergence, not eight walks. Blocking to deliver the second would stall the drain that prevents further overflow. |
+| 95 | `ChangeSet.RescanReason` accompanies `FullRescan` | The flag tells a consumer how to apply the set; the reason tells an operator whether the machine is dropping notifications, whether no native watcher is available, or whether this is simply the initial index. Those call for different responses and do not collapse into one bit. |
+| 96 | A scan or apply failure **returns** from `Run` | A loop that retried quietly would report a fresh index while diverging from the tree — the silent degradation R-ERR-05 and SDD §15 both forbid. The caller decides whether to restart, because only the caller knows whether a failing walk is transient. |
+| 97 | A source that stops flushes what it already has | A watcher shutting down is not a reason to discard edits the user already made. |
+| 98 | `PollSource` declares itself on every batch | It cannot observe individual changes, so every batch is a `Rescan` carrying `poll_interval`. Presenting a rebuild as an update would hide that this deployment has no native watcher — and it is the floor, not the target: a full walk does not meet CTX-2 on a large tree. |
 
 **CTX-A01i citation protocol (C1–C10)**
 

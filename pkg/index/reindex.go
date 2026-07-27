@@ -66,6 +66,11 @@ type ChangeSet struct {
 	// FullRescan reports that the set was derived from a walk of the whole tree, so a consumer may
 	// treat anything it holds outside the set as absent.
 	FullRescan bool
+	// RescanReason explains why a full walk happened, empty on an ordinary delta. The flag alone
+	// tells a consumer how to apply the set; the reason tells an operator whether the machine is
+	// dropping notifications, whether no native watcher is available, or whether this is simply the
+	// initial index. Those call for different responses, so they are not collapsed into one bit.
+	RescanReason string
 }
 
 // Empty reports whether the set would change nothing.
