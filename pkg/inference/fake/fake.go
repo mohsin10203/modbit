@@ -48,6 +48,9 @@ type Faults struct {
 	DivergentStreamText bool
 	// MisreportToolUse returns FinishToolUse with no tool call part.
 	MisreportToolUse bool
+	// TruncateStream ends the stream without a terminal event, modelling a provider connection that
+	// dropped mid-response.
+	TruncateStream bool
 	// RejectMedia refuses media parts even where the model record declares support, so the
 	// capability record and the adapter disagree.
 	RejectMedia bool
@@ -85,6 +88,7 @@ type Adapter struct {
 
 	mu          sync.Mutex
 	calls       int
+	sentEvents  int
 	lastRequest *inference.Request
 }
 
@@ -141,6 +145,16 @@ func (a *Adapter) Calls() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.calls
+}
+
+// SentEvents returns how many stream events the adapter has managed to hand downstream.
+//
+// It is the observable behind a backpressure assertion: a consumer that stops reading should stop
+// this counter advancing, because an unbuffered pipeline propagates the stall all the way up.
+func (a *Adapter) SentEvents() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sentEvents
 }
 
 // LastRequest returns the request the adapter most recently received, or nil.
@@ -276,6 +290,8 @@ func (a *Adapter) applicableToolCalls(req inference.Request) []inference.ToolCal
 func (a *Adapter) Stream(ctx context.Context, req inference.Request, model inference.Capabilities, cred inference.Credential) (<-chan inference.StreamEvent, error) {
 	a.mu.Lock()
 	a.calls++
+	received := req
+	a.lastRequest = &received
 	a.mu.Unlock()
 
 	if err := ctx.Err(); err != nil {
@@ -325,6 +341,9 @@ func (a *Adapter) emit(ctx context.Context, req inference.Request, model inferen
 		}
 		select {
 		case events <- e:
+			a.mu.Lock()
+			a.sentEvents++
+			a.mu.Unlock()
 			return true
 		case <-ctx.Done():
 			return a.Faults.IgnoreCancellation
@@ -364,6 +383,11 @@ func (a *Adapter) emit(ctx context.Context, req inference.Request, model inferen
 		}) {
 			return
 		}
+	}
+
+	if a.Faults.TruncateStream {
+		// Return without a terminal event; the deferred close models a dropped connection.
+		return
 	}
 
 	text := strings.TrimSpace(strings.Join(emitted, ""))

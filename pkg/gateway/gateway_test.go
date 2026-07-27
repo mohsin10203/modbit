@@ -72,6 +72,12 @@ func (failingInspector) Inspect(context.Context, inference.Request) (gateway.Ver
 	return gateway.Verdict{}, errors.New("dlp service unreachable")
 }
 
+// marshalCall serializes model-call metadata for leak assertions.
+func marshalCall(c gateway.ModelCall) (string, error) {
+	encoded, err := json.Marshal(c)
+	return string(encoded), err
+}
+
 func testModel(provider, model string) inference.Capabilities {
 	return inference.Capabilities{
 		ProviderID: provider, ModelID: model, Revision: "2026-07-01",

@@ -80,6 +80,9 @@ type Options struct {
 	Recorder  Recorder
 	Clock     Clock
 	Generator *id.Generator
+	// ConsumerStallTimeout bounds how long a stream waits for a consumer that stopped reading
+	// before abandoning it (S9). Zero means the package default.
+	ConsumerStallTimeout time.Duration
 	// MaxRouteAttempts bounds failover across eligible candidates. Failover is safe by
 	// construction here — every candidate already satisfied the same capability, residency,
 	// retention, and budget envelope (§14.4) — but it still needs an attempt budget (R-ERR-03).
@@ -89,14 +92,15 @@ type Options struct {
 // Gateway is the model egress boundary. It holds no run or tenant state and is safe for concurrent
 // use (R-GO-06).
 type Gateway struct {
-	registry    *inference.Registry
-	inspector   Inspector
-	broker      CredentialBroker
-	spend       SpendReporter
-	recorder    Recorder
-	clock       Clock
-	generator   *id.Generator
-	maxAttempts int
+	registry             *inference.Registry
+	inspector            Inspector
+	broker               CredentialBroker
+	spend                SpendReporter
+	recorder             Recorder
+	clock                Clock
+	generator            *id.Generator
+	maxAttempts          int
+	consumerStallTimeout time.Duration
 }
 
 // New validates options and returns a Gateway.
@@ -116,14 +120,15 @@ func New(opts Options) (*Gateway, error) {
 			"gateway requires a credential broker; provider credentials exist only inside this boundary")
 	}
 	g := &Gateway{
-		registry:    opts.Registry,
-		inspector:   opts.Inspector,
-		broker:      opts.Broker,
-		spend:       opts.Spend,
-		recorder:    opts.Recorder,
-		clock:       opts.Clock,
-		generator:   opts.Generator,
-		maxAttempts: opts.MaxRouteAttempts,
+		registry:             opts.Registry,
+		inspector:            opts.Inspector,
+		broker:               opts.Broker,
+		spend:                opts.Spend,
+		recorder:             opts.Recorder,
+		clock:                opts.Clock,
+		generator:            opts.Generator,
+		maxAttempts:          opts.MaxRouteAttempts,
+		consumerStallTimeout: opts.ConsumerStallTimeout,
 	}
 	if g.clock == nil {
 		g.clock = systemClock{}
@@ -395,41 +400,13 @@ func (g *Gateway) checkBudget(ctx context.Context, c Call, candidate inference.C
 func (g *Gateway) finish(ctx context.Context, c Call, p prepared, candidate inference.Candidate,
 	resp inference.Response, failovers []Failover, started time.Time) (Result, error) {
 
-	completed := g.clock.Now()
-	callID, err := g.generator.New(id.ModelCall)
-	if err != nil {
-		return Result{}, modberr.Wrap(err, modberr.CodeInternal, "allocate model-call identifier")
-	}
-
 	// Losses from the policy clamp and from the adapter are merged: a caller weighing whether a
 	// completion is adequate evidence needs both in one place.
 	losses := append(append([]inference.Loss{}, p.policyLosses...), resp.Losses...)
 	resp.Losses = losses
 
-	call := ModelCall{
-		ID:                 callID,
-		OrganizationID:     c.OrganizationID,
-		RunID:              c.Request.RunID,
-		StepID:             c.Request.StepID,
-		Alias:              c.Request.Alias,
-		ProviderID:         candidate.Model.ProviderID,
-		ModelID:            candidate.Model.ModelID,
-		DeclaredRevision:   candidate.Model.Revision,
-		ObservedRevision:   resp.ModelRevision,
-		Classification:     p.classification,
-		DLPFindings:        p.findings,
-		Losses:             losses,
-		Usage:              resp.Usage,
-		Cost:               candidate.Model.EstimateCost(resp.Usage),
-		EstimatedCost:      p.estimatedCost,
-		FinishReason:       resp.FinishReason,
-		Taint:              c.Taint,
-		Failovers:          failovers,
-		PolicyDecisionID:   c.PolicyDecisionID,
-		SettingsSnapshotID: c.Settings.ID,
-		StartedAt:          started,
-		CompletedAt:        completed,
-	}
+	call := g.buildCall(c, p, candidate, resp.FinishReason, resp.Usage, losses, failovers,
+		started, resp.ModelRevision)
 
 	result := Result{Response: resp, Call: call}
 	if g.recorder != nil {
@@ -439,6 +416,47 @@ func (g *Gateway) finish(ctx context.Context, c Call, p prepared, candidate infe
 		result.RecordingErr = g.recorder.Record(ctx, call)
 	}
 	return result, nil
+}
+
+// buildCall assembles model-call metadata.
+//
+// Complete and the streaming pump share it so a stream's evidence is structurally identical to a
+// completion's. Divergence here would mean the same call recorded two different ways depending on
+// which surface a caller happened to use.
+func (g *Gateway) buildCall(c Call, p prepared, candidate inference.Candidate,
+	finish inference.FinishReason, usage inference.Usage, losses []inference.Loss,
+	failovers []Failover, started time.Time, observedRevision string) ModelCall {
+
+	callID, err := g.generator.New(id.ModelCall)
+	if err != nil {
+		// Metadata must exist even when identifier allocation fails: an unattributed call is worse
+		// than one with a zero id, because the usage is invisible rather than merely unlabelled.
+		callID = ""
+	}
+	return ModelCall{
+		ID:                 callID,
+		OrganizationID:     c.OrganizationID,
+		RunID:              c.Request.RunID,
+		StepID:             c.Request.StepID,
+		Alias:              c.Request.Alias,
+		ProviderID:         candidate.Model.ProviderID,
+		ModelID:            candidate.Model.ModelID,
+		DeclaredRevision:   candidate.Model.Revision,
+		ObservedRevision:   observedRevision,
+		Classification:     p.classification,
+		DLPFindings:        p.findings,
+		Losses:             losses,
+		Usage:              usage,
+		Cost:               candidate.Model.EstimateCost(usage),
+		EstimatedCost:      p.estimatedCost,
+		FinishReason:       finish,
+		Taint:              c.Taint,
+		Failovers:          failovers,
+		PolicyDecisionID:   c.PolicyDecisionID,
+		SettingsSnapshotID: c.Settings.ID,
+		StartedAt:          started,
+		CompletedAt:        g.clock.Now(),
+	}
 }
 
 func aliasPermitted(allowed []string, alias string) bool {

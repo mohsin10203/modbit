@@ -52,6 +52,14 @@ tests:
   - pkg/gateway:TestPerRunCostCapIsEnforcedBeforeTheCall
   - pkg/gateway:TestFailoverIsBoundedAndRecorded
   - pkg/gateway:TestRevisionDriftIsDetectable
-  # Outstanding for MOD-A01f/g: streaming pipeline, canonical event emission, provider egress
-  # allowlist, and the OEV-1 revision-drift event. Tracked in tasks.md.
+  - pkg/gateway:TestStreamDeliversDeltasThenExactlyOneTerminalResult
+  - pkg/gateway:TestStreamPreparationRefusalsAreSynchronous
+  - pkg/gateway:TestStreamPerformsNoEgressBeforeDLP
+  - pkg/gateway:TestStreamRecordsMetadataOnEveryTermination
+  - pkg/gateway:TestStreamCancellationIsPrompt
+  - pkg/gateway:TestStreamAppliesBackpressureToTheProvider
+  - pkg/gateway:TestStreamAbandonsAStalledConsumer
+  - pkg/gateway:TestStreamTreatsATruncatedProviderStreamAsFailure
+  # Outstanding for MOD-A01j/k: canonical event emission, provider egress allowlist, and the
+  # OEV-1 revision-drift event. Tracked in tasks.md.
   - conformance/model-gateway

@@ -394,3 +394,50 @@ func TestReportDetailsCarryNoUpstreamContent(t *testing.T) {
 		t.Error("expected the failure to still be reported")
 	}
 }
+
+// The gateway can guarantee its streaming protocol only if adapters uphold theirs. Each fault here
+// is a way an adapter breaks the terminal contract the pump depends on.
+func TestSuiteDetectsStreamTerminalContractViolations(t *testing.T) {
+	t.Parallel()
+	// The two cases divide the work: stream_terminal_contract owns the event *sequence*, streaming
+	// owns *assembly* of the final response. Naming which case must fire keeps that boundary honest.
+	tests := []struct {
+		name     string
+		fault    fake.Faults
+		wantCase string
+	}{
+		{"stream truncated with no terminal event", fake.Faults{TruncateStream: true}, "stream_terminal_contract"},
+		{"terminal event carries no assembled response", fake.Faults{OmitFinalResponse: true}, "streaming"},
+		{"assembled response disagrees with the deltas", fake.Faults{DivergentStreamText: true}, "streaming"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			model := fullModel()
+			a := conformantAdapter(model)
+			a.Faults = tc.fault
+
+			report := run(t, a, model)
+			if report.ProductionReady() {
+				t.Fatalf("suite passed an adapter breaking the terminal contract: %s", report.Summary())
+			}
+			res := statusOf(t, report, tc.wantCase)
+			if res.Status != conformance.StatusFail {
+				t.Fatalf("%s = %s (%s), want fail", tc.wantCase, res.Status, res.Detail)
+			}
+		})
+	}
+}
+
+// A model with no streaming support legitimately skips the case.
+func TestStreamTerminalContractSkippedWithoutStreamingSupport(t *testing.T) {
+	t.Parallel()
+	model := fullModel()
+	model.SupportsStreaming = false
+	model.SupportsCancellation = false
+
+	report := run(t, conformantAdapter(model), model)
+	if got := statusOf(t, report, "stream_terminal_contract").Status; got != conformance.StatusSkipped {
+		t.Errorf("stream_terminal_contract = %s, want skipped", got)
+	}
+}

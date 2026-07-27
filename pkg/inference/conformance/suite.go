@@ -197,6 +197,7 @@ func RunWithOptions(ctx context.Context, adapter inference.Adapter, model infere
 	r.checkErrorClassification(ctx)
 	r.checkTokenCounting(ctx)
 	r.checkCredentialIsolation(ctx)
+	r.checkStreamTerminalContract(ctx)
 
 	return Report{
 		SuiteVersion: SuiteVersion,
@@ -722,6 +723,66 @@ func (r *runner) checkTokenCounting(ctx context.Context) {
 		return
 	}
 	r.pass(name, req)
+}
+
+// checkStreamTerminalContract asserts the properties the gateway pump depends on.
+//
+// The gateway can guarantee its own streaming protocol only if adapters uphold theirs: a terminal
+// event that never arrives becomes a truncated response, and a duplicate one becomes two
+// contradictory metadata records for the same call.
+func (r *runner) checkStreamTerminalContract(ctx context.Context) {
+	const name, req = "stream_terminal_contract", "ADP-5.streaming"
+	if !r.model.SupportsStreaming {
+		r.skip(name, req, "model does not declare streaming support")
+		return
+	}
+
+	streamCtx, cancel := context.WithTimeout(ctx, r.opts.StreamTimeout)
+	defer cancel()
+
+	events, err := r.adapter.Stream(streamCtx, r.request(), r.model, r.cred)
+	if err != nil {
+		r.fail(name, req, "Stream returned an error: "+message(err))
+		return
+	}
+
+	var starts, stops, afterStop int
+	timeout := time.After(r.opts.StreamTimeout)
+	for open := true; open; {
+		select {
+		case e, more := <-events:
+			if !more {
+				open = false
+				continue
+			}
+			switch e.Kind {
+			case inference.StreamMessageStart:
+				starts++
+			case inference.StreamMessageStop:
+				stops++
+			default:
+				if stops > 0 {
+					afterStop++
+				}
+			}
+		case <-timeout:
+			r.fail(name, req, "stream did not close its channel within the timeout")
+			return
+		}
+	}
+
+	switch {
+	case starts != 1:
+		r.fail(name, req, fmt.Sprintf("stream emitted %d message_start events, want exactly 1", starts))
+	case stops != 1:
+		r.fail(name, req, fmt.Sprintf("stream emitted %d message_stop events, want exactly 1", stops))
+	case afterStop > 0:
+		// Content after the terminal event has nowhere to go: the consumer has already been told
+		// the response is complete and may have recorded it as evidence.
+		r.fail(name, req, fmt.Sprintf("stream emitted %d events after message_stop", afterStop))
+	default:
+		r.pass(name, req)
+	}
 }
 
 // checkCredentialIsolation asserts an adapter refuses material minted for another provider. An

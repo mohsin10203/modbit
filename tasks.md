@@ -51,7 +51,7 @@ Docket: `SET-A01`, `QA-A01` precursors. PRD: §20A (settings), §26 (API/events)
 | FND-07 | `tools/modbitgen` — Go + TS generation from `contracts/` | R-CTR-02/03 | ✅ Qualified | `tools/modbitgen`, 20 validation tests |
 | FND-08 | `pkg/taint` — provenance classes, lattice, propagation, ledger | TNT-1, TNT-2, TNT-6 | ✅ Qualified | `pkg/taint`, 24 tests |
 | FND-09 | `pkg/policy` — side-effect classes, decision engine, taint escalation | SFX-1..5, TNT-3/4 | ✅ Qualified | `pkg/policy`, 34 tests incl. TNT-7 adversarial suite |
-| FND-10 | `make check` wiring + generated-code drift gate | R-CTR-03 | ✅ Qualified | `make check` green — 321 assertions, `-race` clean |
+| FND-10 | `make check` wiring + generated-code drift gate + error-contract freeze | R-CTR-03, R-CTR-04 | ✅ Qualified | `make check` green — 348 assertions, `-race` clean |
 
 ### FND acceptance
 
@@ -110,6 +110,22 @@ Five defects found by a review pass over the foundation. All five are now regres
 
 ---
 
+## Repository infrastructure
+
+| ID | Task | Status | Evidence |
+|---|---|---|---|
+| INF-01 | Version control initialized; foundation and gate commits on `main` | ✅ Released | `git log` |
+| INF-02 | Drift gate active — hard-fails without `.git`, compares against `HEAD` so staged staleness cannot slip through | ✅ Qualified | verified by committing a tampered generated file and confirming rejection |
+| INF-03 | Error-contract freeze — `contracts/errors/catalog.lock`, sha256 per code over wire-visible semantics | ✅ Qualified | verified in three directions: rename fails, retryability flip fails, addition passes |
+
+**Why the freeze exists.** The drift gate proves generated code matches the contract; it cannot
+prove the contract only ever grew. A renamed code, a flipped `retryable` flag, or a dropped detail
+key silently breaks every peer, SDK, and stored audit record carrying the old semantics. The lock
+digests `http_status`, `retryable`, `deprecated`, and the sorted detail-key allowlist, excluding
+descriptions, which are prose and may be improved.
+
+---
+
 ## ADR-0100 adoptions — engineering-specifications.md as secondary reference
 
 `engineering-specifications.md` ("Agent Harness v2.2") is a **secondary engineering reference**, not
@@ -137,6 +153,34 @@ Three additive items adopted under that ADR:
 | 24 | The field is `fence_epoch`, not `fence_token` | The R-ERR-02 key guard rejected `fence_token`, and it was right to. Two things are conflated in the literature: the fencing value is a monotonic counter and is not secret, while a lease *token* is bearer material that must never appear in an error. The fix was to name the non-secret value precisely rather than carve an exception into the control. |
 | 25 | An expired approval returns `MODBIT_APPROVAL_REQUIRED`, a mismatched one returns `MODBIT_APPROVAL_INVALIDATED` | Different recovery: one needs a fresh lease or a fresh ask, the other needs a new approval showing the changed effect. |
 | 26 | A presented-but-invalid approval is **reported**, not ignored | Silently falling back to "approval required" would hide that a stale grant was attempted. |
+
+### MOD-A01i streaming protocol (S1–S10)
+
+Stated as numbered invariants in `pkg/gateway/streaming.go`, one test each in `streaming_test.go`.
+A test without an S-number, or an S-number without a test, is a gap.
+
+| # | Invariant |
+|---|---|
+| S1 | Preparation is synchronous; a refused call returns `(nil, err)` with no channel allocated |
+| S2 | No egress precedes DLP — no credential leased, no provider stream opened |
+| S3 | The channel is closed exactly once, on every exit path |
+| S4 | Exactly one terminal event, always before close |
+| S5 | A terminal event carries a `Result` or an `Err`, never both, never neither |
+| S6 | Metadata recorded exactly once on every termination, cancellation included |
+| S7 | Cancellation abandons the upstream rather than draining it |
+| S8 | Backpressure reaches the provider; the gateway holds no buffer |
+| S9 | A stalled consumer cannot leak the pump; it is abandoned after `ConsumerStallTimeout` |
+| S10 | Redaction and declared losses behave identically to the non-streaming path |
+
+**Decisions**
+
+| # | Decision | Rationale |
+|---|---|---|
+| 27 | The terminal send does **not** select on `ctx.Done()` | Cancelling the work must not cancel the notification that the work ended. Selecting on an already-closed context makes delivery a coin flip between two ready `select` cases, so a cancelled stream would *sometimes* close without a terminal event. Found by the `drain` helper enforcing S4 on every use — the cancellation test had been passing by luck. |
+| 28 | The output channel is unbuffered | Every event the consumer has not taken is one the pump has not read from the provider, so backpressure reaches the upstream instead of accumulating in a queue whose depth nobody chose. |
+| 29 | Failover stops at the first byte | A second provider cannot resume another's partial response, and re-running from the start would either duplicate deltas the caller already rendered or silently discard them. Establishment failures fail over; mid-stream failures are terminal. |
+| 30 | A provider stream closing with no terminal event is a **failure**, not a success | Reporting it as success would let a truncated answer pass as a whole one. |
+| 31 | `buildCall` is shared by `Complete` and the pump | Divergence would mean the same call recorded two different ways depending on which surface the caller used. |
 
 **Deferred to later ADRs:** retrieval ranking and coverage-constrained packing · routing utility and
 bandit calibration · memory scoring and decay · planner portfolio · effect reconciliation protocol ·
@@ -177,7 +221,7 @@ Capability registry entry: `contracts/capabilities/model.canonical-ir.yaml`.
 | MOD-A01f | Gateway pipeline: settings/policy validation → classification → DLP → route → adapter → usage → immutable metadata | §10 SDD, INV-1, INV-3 | ✅ Qualified (non-streaming) | `pkg/gateway`, 25 assertions. Streaming pipeline and canonical event emission outstanding — see MOD-A01i/j |
 | MOD-A01g | First provider adapter + OpenAI-compatible local endpoint | §14.1 | ⬜ Ready | |
 | MOD-A01h | Provider credential boundary | INV-2, SDD §10 | ✅ Qualified | `pkg/inference/credential.go`, `TestCredentialResistsAccidentalDisclosure` |
-| MOD-A01i | Gateway streaming pipeline with normalized deltas and usage on terminal event | SDD §10 | ⬜ Ready | |
+| MOD-A01i | Gateway streaming pipeline: S1–S10 protocol, cancellation, backpressure, stall abandonment | SDD §10 | ✅ Qualified | `pkg/gateway/streaming.go`, 16 protocol tests + `stream_terminal_contract` conformance case |
 | MOD-A01j | Canonical event emission from the gateway (`model.requested`/`routed`/`completed`/`failed_over`, `evaluation.revision.detected`) | INV-5, OEV-1 | ⬜ Ready | metadata already carries declared vs observed revision |
 | MOD-A01k | Provider egress allowlist and no-filesystem-mounts deployment posture | SDD §10 | ⬜ Ready | deployment-level control, not a library one |
 
