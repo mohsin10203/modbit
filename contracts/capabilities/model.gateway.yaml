@@ -65,6 +65,9 @@ tests:
   - pkg/gateway:TestRevisionDriftEmitsAnEvaluationEvent
   - pkg/gateway:TestEmittedEventsCarryNoBody
   - pkg/gateway:TestStreamEmitsTheSameTerminalEventsAsComplete
-  # Outstanding for MOD-A01k: provider egress allowlist and the no-filesystem-mounts deployment
-  # posture. Tracked in tasks.md.
+  - pkg/gateway:TestSecurityDNSRebindToAPrivateAddressIsRefused
+  - pkg/gateway:TestSecurityCloudMetadataEndpointsAreRefused
+  - pkg/gateway:TestSecurityRedirectOffTheAllowlistIsRefused
+  - pkg/gateway:TestUndeclaredProviderCannotObtainATransport
+  - pkg/gateway:TestPlaintextIsRefusedForHostedProviders
   - conformance/model-gateway

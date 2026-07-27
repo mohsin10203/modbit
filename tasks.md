@@ -51,7 +51,7 @@ Docket: `SET-A01`, `QA-A01` precursors. PRD: §20A (settings), §26 (API/events)
 | FND-07 | `tools/modbitgen` — Go + TS generation from `contracts/` | R-CTR-02/03 | ✅ Qualified | `tools/modbitgen`, 20 validation tests |
 | FND-08 | `pkg/taint` — provenance classes, lattice, propagation, ledger | TNT-1, TNT-2, TNT-6 | ✅ Qualified | `pkg/taint`, 24 tests |
 | FND-09 | `pkg/policy` — side-effect classes, decision engine, taint escalation | SFX-1..5, TNT-3/4 | ✅ Qualified | `pkg/policy`, 34 tests incl. TNT-7 adversarial suite |
-| FND-10 | `make check` wiring + generated-code drift gate + error-contract freeze | R-CTR-03, R-CTR-04 | ✅ Qualified | `make check` green — 357 assertions, `-race` clean |
+| FND-10 | `make check` wiring + generated-code drift gate + error-contract freeze | R-CTR-03, R-CTR-04 | ✅ Qualified | `make check` green — 379 assertions, `-race` clean |
 
 ### FND acceptance
 
@@ -191,6 +191,22 @@ A test without an S-number, or an S-number without a test, is a gap.
 | 34 | A `Recorder` without a `Sequencer` is refused at construction | Run-scoped events without a monotonic sequence produce a log that cannot be reassembled (R-EVT-01, R-EVT-07). Refusing at construction beats discovering it on the first call. |
 | 35 | Revision drift emits an **organization-scoped** event | A revision roll affects every run routed to that model, not just the one that happened to notice. |
 
+### MOD-A01k egress control
+
+**MOD-A01 is now complete.** Every sub-item a–k is Qualified.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 36 | The egress allowlist is a **library** control, not only a deployment one | A pod network policy is the outer fence and should exist, but it is applied by a different team in a different repository, is absent in desktop and local deployments entirely, and cannot distinguish one provider's traffic from another's. `Guard` sits in the adapter's own transport, so an adapter cannot reach a destination its capability record does not declare. |
+| 37 | Resolved **addresses** are checked, not just hostnames | The host check alone is satisfied by a DNS rebind: an allowlisted name whose record points at an internal address. Blocked ranges cover loopback, RFC1918, link-local (169.254.169.254 — the standard escalation from request forgery to credential compromise), IPv6 equivalents, IPv4-mapped forms, carrier-grade NAT, multicast, and unspecified. |
+| 38 | The check runs **per hop** | Each redirect is its own `RoundTrip`, so a chain starting at an allowed host and ending elsewhere is caught where it leaves the allowlist. |
+| 39 | An empty or `*` allowlist is refused at construction | Both would look configured while permitting everything. |
+| 40 | An unresolvable destination fails closed | It cannot be address-checked, so allowing it through unverified would defeat the rebind defence. |
+| 41 | Loopback and plaintext are opt-in **per provider** | Ollama, vLLM, and LM Studio-compatible endpoints legitimately live on 127.0.0.1, so the capability must exist — scoped to providers that declare it, and never inherited by a hosted one. |
+
+**Still deployment-level:** no filesystem mounts on the gateway workload, and the pod-level network
+policy. Neither is expressible in a Go library; both belong to DEP-C01.
+
 ### Bug sweep (2026-07-27)
 
 | # | Defect | Impact | Fix |
@@ -243,7 +259,7 @@ Capability registry entry: `contracts/capabilities/model.canonical-ir.yaml`.
 | MOD-A01h | Provider credential boundary | INV-2, SDD §10 | ✅ Qualified | `pkg/inference/credential.go`, `TestCredentialResistsAccidentalDisclosure` |
 | MOD-A01i | Gateway streaming pipeline: S1–S10 protocol, cancellation, backpressure, stall abandonment | SDD §10 | ✅ Qualified | `pkg/gateway/streaming.go`, 16 protocol tests + `stream_terminal_contract` conformance case |
 | MOD-A01j | Canonical event emission, written atomically with the metadata | INV-5, R-EVT-04, OEV-1 | ✅ Qualified | `pkg/gateway/events.go`, 9 assertions |
-| MOD-A01k | Provider egress allowlist and no-filesystem-mounts deployment posture | SDD §10 | ⬜ Ready | deployment-level control, not a library one |
+| MOD-A01k | Provider egress allowlist enforced in-process; no-filesystem-mounts remains deployment-level | SDD §10 | ✅ Qualified | `pkg/gateway/egress.go`, 22 assertions incl. metadata-endpoint and DNS-rebind suites |
 
 **MOD-A01e — conformance suite design**
 
