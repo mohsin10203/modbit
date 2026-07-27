@@ -233,7 +233,7 @@ PRD §6.1. Docket §3.
 | IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | 🚧 In Progress — resolver, generation, and validation done (FND-06/07); local files, UI metadata, and sync outstanding |
-| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — see breakdown below. Classification, walk, incremental reindex, worktree awareness, snapshots, and citations Qualified; the OS change source and the three indexes remain |
+| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**; what remains is six native backends behind ports that already exist and are tested (`c3`–`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | 🚧 In Progress — see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
@@ -263,6 +263,20 @@ The resolution is the port pattern the repository already uses for pgvector and 
 `ChangeSource`, ship a portable implementation now, and add native backends per platform as
 `CTX-A01c3`–`c5`. `go.mod` stays at one dependency, and the backend that macOS actually needs
 (FSEvents — recursive, one watch per tree) was never what fsnotify offered.
+
+**The pattern generalised.** Every remaining CTX-A01 item took the same shape, and the shape is now
+the default for this workstream: define the port, ship a correct in-process implementation, prove
+the contract against it, and let the engine decision be its own ADR. That gave `ChangeSource` +
+`PollSource`, `LexicalIndex` + BM25, `VectorIndex` + `Embedder` + exhaustive cosine, and
+`SymbolExtractor` + a standard-library Go extractor. Four consequences worth keeping:
+
+- `go.mod` still holds **one** direct dependency after six capabilities.
+- Every port has a working implementation, so no channel is a stub — the Go extractor indexes this
+  repository, and the in-process indexes serve a single repository fine.
+- The reference implementations are what an engine gets measured against. Exhaustive cosine has 100%
+  recall by construction, which is exactly the baseline RET-10 needs for an approximate index.
+- The contracts were provable *before* any engine was chosen, so an adapter arrives with its
+  invariants already written down rather than inferred from whatever the engine happens to do.
 
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
