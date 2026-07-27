@@ -273,7 +273,8 @@ The resolution is the port pattern the repository already uses for pgvector and 
 | CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | ⬜ Ready | Recursive, one watch per tree. The only backend that meets CTX-2 on a large tree on the primary developer platform — see the watcher dependency finding below |
 | CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
-| CTX-A01d | Lexical index (Tantivy-class) | CTX-5 | ⬜ Ready | |
+| CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
+| CTX-A01d2 | Native lexical engine behind the port (Tantivy local / OpenSearch server) | CTX-5 | ⬜ Ready | Engine choice needs an ADR under R-ARCH-01: Tantivy is Rust, so it means cgo or a sidecar |
 | CTX-A01e | Symbol extraction and dependency graph | CTX-5 | ⬜ Ready | |
 | CTX-A01f | Semantic index (pgvector behind adapter) | CTX-5 | ⬜ Ready | |
 | CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ✅ Qualified | `pkg/index/worktree.go`, 26 assertions incl. ref-name and partition-key security suites |
@@ -378,6 +379,41 @@ were mutation-verified.
 | 96 | A scan or apply failure **returns** from `Run` | A loop that retried quietly would report a fresh index while diverging from the tree — the silent degradation R-ERR-05 and SDD §15 both forbid. The caller decides whether to restart, because only the caller knows whether a failing walk is transient. |
 | 97 | A source that stops flushes what it already has | A watcher shutting down is not a reason to discard edits the user already made. |
 | 98 | `PollSource` declares itself on every batch | It cannot observe individual changes, so every batch is a `Rescan` carrying `poll_interval`. Presenting a rebuild as an update would hide that this deployment has no native watcher — and it is the floor, not the target: a full walk does not meet CTX-2 on a large tree. |
+
+**CTX-A01d lexical protocol (L1–L8)**
+
+CTX-5's lexical channel and RET-1's `bm25` term. Same port pattern as the watcher: SDD §2 names
+Tantivy locally and OpenSearch on the server, both engine choices belonging in an ADR, and what must
+not wait for that decision is the contract — what a lexical channel may hold, what it may return,
+and which revision it answers for.
+
+| # | Invariant |
+|---|---|
+| L1 | A document indexed for one revision is never returned to a query on another |
+| L2 | Only indexable content becomes a document; construction is the gate |
+| L3 | A removed path never appears in a later result |
+| L4 | Re-indexing a path replaces its documents rather than accumulating them |
+| L5 | Ranking is deterministic: the same corpus and query always produce the same order |
+| L6 | Identifiers match their parts, so camelCase and snake_case are searchable |
+| L7 | Every match carries the path and span a citation needs |
+| L8 | A query with no usable terms returns nothing, never everything |
+
+L1–L7 are mutation-verified. **L8 is not, and is documented as such**: with no terms the scoring
+loop accumulates nothing, so deleting the guard does not fail its test. It is a property of this
+implementation rather than an enforced invariant, and the test is kept for the implementations the
+port exists to admit — a match-all-on-empty-query path is a reasonable-looking thing for a Tantivy
+or OpenSearch adapter to inherit from its engine.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 99 | A document is a **span**, not a file | A retrieval budget is spent in spans and a citation names one (RET-6). dev-06 places one BM25 document per chunk for the same reason. It also means a `Match` converts to a `ContextItem` without a second lookup. |
+| 100 | `Chunk` refuses a non-indexable entry, mirroring `Cite` | Construction is the gate in both places. A file the classifier excluded has no business in a full-text index, and refusing at construction means no implementation of the port has to re-check — which matters precisely because the other implementations are third-party engines. A `reference` file is refused too: Modbit never read it, so any text would be fabricated. |
+| 101 | The index stores tokens and postings, never bodies | An index holding document text would be a second copy of the repository sitting outside the classifier's reach, and it would survive the retraction that decision 57 exists to guarantee. |
+| 102 | Tokenization splits identifiers **and** keeps the whole form | A plain word splitter makes `getUserName` one term, so "user name" misses the function that defines it and the identifier misses `get_user_name` beside it. Splitting happens before lowercasing, because the case boundary *is* the delimiter; an acronym run is cut before its last capital so `HTTPServer` yields `http`+`server` rather than `httpserve`+`r`. |
+| 103 | Ranking has a total order, not just a score sort | Map iteration is random, so an unbroken tie reorders between runs and a recorded retrieval stops being reproducible evidence — the same reason routing is deterministic (MOD-A01 decision 6). Path then span start makes it total. |
+| 104 | BM25 `k1`/`b` are constants, not settings | A ranking-model detail with no operator-meaningful interpretation. Exposing it would invite tuning that RET-10's benchmark, not a preference, should drive. |
+| 105 | One unreadable file does not abort the batch | Aborting would leave every later file unindexed too, turning one missing document into an arbitrary number the caller cannot enumerate. The batch completes and the shortfall returns `MODBIT_CONTEXT_DEGRADED` carrying the channel, not the paths — a path is itself information (decision 78). |
+| 106 | A file that chunks to nothing is **retracted** | An edit that empties a file must not leave its old text searchable. This is decision 57 applied to the lexical channel. |
 
 **CTX-A01i citation protocol (C1–C10)**
 
