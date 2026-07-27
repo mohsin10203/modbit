@@ -1,0 +1,57 @@
+# Capability: Model Gateway egress boundary.
+#
+# The single point through which hosted model traffic leaves Modbit (INV-1), and the only place
+# provider credentials exist (INV-2). Registered so the boundary has an owner and a release gate.
+
+id: model.gateway
+version: 1
+owner: inference-platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§14.3-routing-policy
+  - PRD-v5.1-§14.4-safe-failover
+  - PRD-v5.1-§17.1-provider-credentials
+  - PRD-v5.1-§17.5-redaction-and-dlp
+  - SDD-v5.1-§10-model-gateway
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: admin_only
+  extension: not_applicable
+
+events:
+  - model.requested
+  - model.routed
+  - model.completed
+  - model.failed
+  - model.failed_over
+  - evaluation.revision.detected
+
+settings:
+  - model.providers.allowed
+  - model.aliases.allowed
+  - model.max_reasoning_effort
+  - model.cost_cap_per_run_micros
+  - model.residency.required_regions
+  - model.retention.max_provider_days
+  - model.prompt_body_logging
+
+tests:
+  - pkg/gateway:TestGatewayRefusesToBeConstructedWithoutItsControls
+  - pkg/gateway:TestDLPFailureFailsClosedAndNeverCallsAProvider
+  - pkg/gateway:TestDLPBlockRefusesEgress
+  - pkg/gateway:TestDLPRedactionRewritesThePayloadBeforeEgress
+  - pkg/gateway:TestDLPInspectsNestedToolResults
+  - pkg/gateway:TestRecordedMetadataCarriesNoPromptOrCompletionBody
+  - pkg/gateway:TestCredentialResistsAccidentalDisclosure
+  - pkg/gateway:TestCredentialFailuresNeverReachAProvider
+  - pkg/gateway:TestPerRunCostCapIsEnforcedBeforeTheCall
+  - pkg/gateway:TestFailoverIsBoundedAndRecorded
+  - pkg/gateway:TestRevisionDriftIsDetectable
+  # Outstanding for MOD-A01f/g: streaming pipeline, canonical event emission, provider egress
+  # allowlist, and the OEV-1 revision-drift event. Tracked in tasks.md.
+  - conformance/model-gateway

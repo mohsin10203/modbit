@@ -1,0 +1,38 @@
+# Capability: taint state display and inspector.
+#
+# Source row: capability-matrix-v5.1.md "Taint state display and inspector (TNT)" — R on every
+# surface including extensions, because a user must be able to see the provenance state that is
+# changing their approval prompts wherever they are working.
+
+id: taint.state_display
+version: 1
+owner: product-security
+security_class: high
+
+requirements:
+  - PRD-v5.1-§12A-TNT-1
+  - PRD-v5.1-§12A-TNT-2
+  - PRD-v5.1-§12A-TNT-5
+  - PRD-v5.1-§12A-TNT-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: required
+  extension: required
+
+events:
+  - taint.class.entered
+  - taint.escalation.applied
+
+settings:
+  - taint.enforcement.enabled
+  - taint.unknown_provenance.class
+
+tests:
+  - pkg/taint:TestPropagateInheritsTheHighestRiskContributor
+  - pkg/taint:TestUnknownProvenanceFailsClosed
+  - pkg/taint:TestDeriveInheritsTaintThroughSummarization
+  - conformance/taint-state-display

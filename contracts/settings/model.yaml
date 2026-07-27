@@ -1,0 +1,117 @@
+# Settings namespace: model.*
+#
+# Authority: PRD v5.1 §14.3 (routing policy), §20A.10 "Models and adaptive routing".
+# Core logic references capability aliases, never fixed model names (R-ARCH-04, ADP-4).
+
+version: 1
+namespace: model
+
+settings:
+  - key: model.providers.allowed
+    type: string_list
+    default: ["*"]
+    scopes: [organization, team, space, agent_profile]
+    merge: intersection
+    change_effect: next_run
+    security_class: critical
+    description: Provider ids eligible for routing. Scopes intersect; lower scopes cannot widen.
+
+  - key: model.aliases.allowed
+    type: string_list
+    default: ["*"]
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: intersection
+    change_effect: next_run
+    security_class: high
+    description: Model capability aliases eligible for routing.
+
+  - key: model.local_first
+    type: bool
+    default: false
+    scopes: [organization, team, space, agent_profile, user, device, session]
+    merge: override
+    change_effect: next_run
+    security_class: medium
+    description: Prefer local inference endpoints when they satisfy required capabilities.
+
+  - key: model.adaptive_router.enabled
+    type: bool
+    default: true
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: override
+    change_effect: next_run
+    security_class: medium
+    description: Allow the gateway to select a route within the policy envelope.
+
+  - key: model.max_reasoning_effort
+    type: enum
+    enum: [none, low, medium, high]
+    default: medium
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: most_restrictive
+    restrictive_order: [none, low, medium, high]
+    change_effect: next_run
+    security_class: medium
+    description: Ceiling on provider reasoning controls where the provider exposes them.
+
+  - key: model.context_window_cap_tokens
+    type: int
+    default: 200000
+    min: 1024
+    max: 10000000
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: medium
+    description: Upper bound on prompt tokens assembled for one model call.
+
+  - key: model.cost_cap_per_run_micros
+    type: int
+    default: 5000000
+    min: 0
+    max: 100000000000
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: high
+    description: Per-run inference spend ceiling in micro-units of the reporting currency.
+
+  - key: model.residency.required_regions
+    type: string_list
+    default: []
+    scopes: [organization, team, space]
+    merge: intersection
+    change_effect: next_run
+    security_class: critical
+    description: Regions a route must satisfy. Empty means no residency constraint.
+
+  - key: model.retention.max_provider_days
+    type: int
+    default: 0
+    min: 0
+    max: 3650
+    scopes: [organization, team, space]
+    merge: minimum
+    change_effect: next_run
+    security_class: critical
+    description: Maximum provider-side retention a route may have. Zero requires zero retention.
+
+  - key: model.pinned_revisions
+    type: object
+    default: {}
+    scopes: [organization, team, space, agent_profile]
+    merge: deep_merge
+    change_effect: next_run
+    security_class: high
+    description: Alias-to-revision pins that hold a route at a verified provider revision (MOD-5).
+
+  - key: model.prompt_body_logging
+    type: enum
+    enum: [off, metadata_only, redacted, full]
+    default: metadata_only
+    scopes: [organization, team, space]
+    merge: most_restrictive
+    restrictive_order: [off, metadata_only, redacted, full]
+    change_effect: immediate
+    security_class: critical
+    description: Prompt and completion body capture. Metadata-only is the product default (INV-4).

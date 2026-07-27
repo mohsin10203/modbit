@@ -1,0 +1,151 @@
+# Settings namespace: agent.*
+#
+# Authority: PRD v5.1 §20A.3 (registry), §20A.10 "Agent behavior" and "Permissions and approvals".
+# Procedure: .skills/settings-key/SKILL.md. Rules: R-SET-01..10.
+
+version: 1
+namespace: agent
+
+settings:
+  - key: agent.execution.mode
+    type: enum
+    enum: [manual, allowlist, auto-review, unrestricted]
+    default: auto-review
+    scopes: [organization, team, space, repository, agent_profile, user, device, repository_local, session]
+    merge: most_restrictive
+    restrictive_order: [manual, allowlist, auto-review, unrestricted]
+    change_effect: next_tool_call
+    security_class: high
+    description: Controls when agent tool calls require approval.
+
+  - key: agent.default_mode
+    type: enum
+    enum: [ask, plan, code, debug, review, verify]
+    default: ask
+    scopes: [organization, team, space, agent_profile, user, repository_local, session]
+    merge: override
+    change_effect: next_run
+    security_class: low
+    description: Workflow mode a new session starts in.
+
+  - key: agent.default_profile
+    type: string
+    default: ""
+    scopes: [organization, team, space, repository, user, repository_local, session]
+    merge: override
+    change_effect: next_run
+    security_class: medium
+    description: Agent Profile id applied when a run does not name one.
+
+  - key: agent.plan_before_code
+    type: bool
+    default: true
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: most_restrictive
+    restrictive_order: [true, false]
+    change_effect: next_run
+    security_class: medium
+    description: Require an approved plan before a Code run may mutate the workspace.
+
+  - key: agent.max_parallel_runs
+    type: int
+    default: 4
+    min: 1
+    max: 64
+    scopes: [organization, team, space, user, device, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: medium
+    description: Maximum concurrent agent runs attributable to one actor.
+
+  - key: agent.max_subagent_depth
+    type: int
+    default: 2
+    min: 0
+    max: 8
+    scopes: [organization, team, space, agent_profile, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: high
+    description: Maximum subagent nesting depth (ORC-2).
+
+  - key: agent.retry_limit
+    type: int
+    default: 3
+    min: 0
+    max: 10
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: medium
+    description: Maximum self-correction attempts per failing step (COR-5).
+
+  - key: agent.auto_verify_before_completion
+    type: bool
+    default: true
+    scopes: [organization, team, space, agent_profile, user]
+    merge: most_restrictive
+    restrictive_order: [true, false]
+    change_effect: next_run
+    security_class: high
+    description: Require the Verify workflow to pass before a run may report completion.
+
+  - key: agent.auto_create_worktree
+    type: bool
+    default: true
+    scopes: [organization, team, space, repository, user, device, repository_local]
+    merge: override
+    change_effect: next_run
+    security_class: low
+    description: Create an isolated git worktree for each Code run.
+
+  - key: agent.tools.denied
+    type: string_list
+    default: []
+    scopes: [organization, team, space, repository, agent_profile, user, session]
+    merge: union_deny
+    change_effect: next_tool_call
+    security_class: critical
+    description: Tool identifiers no run may invoke. Denials from every scope are unioned.
+
+  - key: agent.tools.allowed
+    type: string_list
+    default: ["*"]
+    scopes: [organization, team, space, repository, agent_profile]
+    merge: intersection
+    change_effect: next_tool_call
+    security_class: critical
+    description: Tool identifiers a run may invoke. Scopes intersect; lower scopes cannot widen.
+
+  - key: agent.approval.duration
+    type: enum
+    enum: [once, session, repository, permanent]
+    default: session
+    scopes: [organization, team, space, repository, user, session]
+    merge: most_restrictive
+    restrictive_order: [once, session, repository, permanent]
+    change_effect: immediate
+    security_class: high
+    description: How long a granted approval may be reused before it must be requested again.
+
+  - key: agent.approval.two_person_threshold
+    type: enum
+    enum: [never, externally_irreversible, externally_compensatable, locally_destructive]
+    default: never
+    scopes: [organization, team, space]
+    merge: most_restrictive
+    restrictive_order: [locally_destructive, externally_compensatable, externally_irreversible, never]
+    change_effect: next_tool_call
+    security_class: critical
+    description: Lowest side-effect class that requires two distinct human approvers.
+
+  - key: agent.approval.expiration_seconds
+    type: int
+    default: 900
+    min: 30
+    max: 86400
+    scopes: [organization, team, space, user]
+    merge: minimum
+    change_effect: immediate
+    security_class: high
+    description: Lifetime of a pending approval request before it expires (SFX-3).

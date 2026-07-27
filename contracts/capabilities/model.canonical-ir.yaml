@@ -1,0 +1,54 @@
+# Capability: canonical inference representation.
+#
+# Not a user-facing capability matrix row — it is the platform contract every model-facing surface
+# depends on. It is registered so that adapter conformance (ADP-5, ADP-6) has an owner and a
+# release gate rather than living only in code review.
+
+id: model.canonical_ir
+version: 1
+owner: inference-platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§14.1-provider-adapter
+  - PRD-v5.1-§14.1.1-ADP-1
+  - PRD-v5.1-§14.1.1-ADP-2
+  - PRD-v5.1-§14.1.1-ADP-3
+  - PRD-v5.1-§14.1.1-ADP-4
+  - PRD-v5.1-§14.2-capability-schema
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: not_applicable
+  extension: not_applicable
+
+events:
+  - model.requested
+  - model.routed
+  - model.stream.delta
+  - model.completed
+  - model.failed
+  - model.failed_over
+
+settings:
+  - model.providers.allowed
+  - model.aliases.allowed
+  - model.context_window_cap_tokens
+  - model.residency.required_regions
+  - model.retention.max_provider_days
+  - model.max_reasoning_effort
+
+tests:
+  - pkg/inference:TestToolReferencesMustFormMatchedPairs
+  - pkg/inference:TestCheckDistinguishesUnsupportedFromDowngraded
+  - pkg/inference:TestGovernanceConstraints
+  - pkg/inference:TestCandidatesRespectThePolicyEnvelope
+  - pkg/inference:TestCandidateOrderIsDeterministic
+  # ADP-5 requires a shared adapter conformance suite covering request translation, parallel and
+  # serial tool calls, schema validation, structured output, streaming, cancellation, retry
+  # classification, errors, usage accounting, prompt caching, revision capture, and content types.
+  # No adapter may be marked production ready until it passes (ADP-6). Tracked as MOD-A01 in tasks.md.
+  - conformance/model-adapter

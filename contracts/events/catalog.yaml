@@ -1,0 +1,201 @@
+# Modbit canonical event catalog.
+#
+# Authority: api-and-events-v5.1.md §4–§5 and the v5.1 event families.
+# Rules: INV-5, R-EVT-01..08. Procedure: .skills/canonical-event/SKILL.md.
+#
+# `scope` drives envelope validation in pkg/event:
+#   run          — requires organization_id, space_id, run_id, and a monotonic sequence
+#   space        — requires organization_id and space_id
+#   organization — requires organization_id
+#   worker       — requires organization_id; run_id optional
+#   system       — organization_id optional (control-plane lifecycle only)
+#
+# `version` is immutable. A breaking payload change adds a new entry at version+1; it never edits
+# an existing one (R-CTR-07).
+
+version: 1
+
+families:
+  - id: run
+    description: Run lifecycle and phase transitions.
+  - id: step
+    description: Step, tool, and model activity inside a run.
+  - id: context
+    description: Indexing, snapshots, and retrieval.
+  - id: wiki
+    description: CodeWiki generation and freshness.
+  - id: approval
+    description: Approval lifecycle.
+  - id: worker
+    description: Worker and environment lifecycle.
+  - id: artifact
+    description: Artifact and review outputs.
+  - id: settings
+    description: Settings and policy publication.
+  - id: automation
+    description: Automation matching and integration effects.
+  - id: mode
+    description: Operating-mode and instruction resolution.
+  - id: security
+    description: Security Swarm scan, finding, validation, and remediation.
+  - id: output
+    description: Structured Output Contract validation.
+  - id: deployment
+    description: Governed application deployment.
+  - id: memory
+    description: Tiered memory and learning (v5.1).
+  - id: taint
+    description: Provenance taint transitions (v5.1).
+  - id: trust
+    description: Graduated autonomy state changes (v5.1).
+  - id: coordination
+    description: Concurrent-run coordination (v5.1).
+  - id: verification
+    description: Verification adequacy (v5.1).
+  - id: evaluation
+    description: Online evaluation and routing (v5.1).
+  - id: evidence
+    description: Evidence export and attachment (v5.1).
+
+events:
+  # -- Run ----------------------------------------------------------------------------------
+  - { type: run.created,                family: run, scope: run, audit: true }
+  - { type: run.classified,             family: run, scope: run }
+  - { type: run.phase.changed,          family: run, scope: run }
+  - { type: run.paused,                 family: run, scope: run, audit: true }
+  - { type: run.resumed,                family: run, scope: run, audit: true }
+  - { type: run.blocked,                family: run, scope: run }
+  - { type: run.completed,              family: run, scope: run, audit: true }
+  - { type: run.failed,                 family: run, scope: run, audit: true }
+  - { type: run.cancelled,              family: run, scope: run, audit: true }
+  - { type: run.reversion.completed,    family: run, scope: run, audit: true }
+  - { type: run.reversion.incomplete,   family: run, scope: run, audit: true }
+
+  # -- Step, tool, model --------------------------------------------------------------------
+  - { type: run.step.started,           family: step, scope: run }
+  - { type: run.step.progress,          family: step, scope: run }
+  - { type: run.step.completed,         family: step, scope: run }
+  - { type: run.step.failed,            family: step, scope: run }
+  - { type: tool.requested,             family: step, scope: run }
+  - { type: tool.authorized,            family: step, scope: run, audit: true }
+  - { type: tool.started,               family: step, scope: run }
+  - { type: tool.output,                family: step, scope: run }
+  - { type: tool.completed,             family: step, scope: run }
+  - { type: tool.failed,                family: step, scope: run }
+  - { type: model.requested,            family: step, scope: run }
+  - { type: model.routed,               family: step, scope: run }
+  - { type: model.stream.delta,         family: step, scope: run }
+  - { type: model.completed,            family: step, scope: run }
+  - { type: model.failed,               family: step, scope: run }
+  - { type: model.failed_over,          family: step, scope: run, audit: true }
+
+  # -- Context and wiki ---------------------------------------------------------------------
+  - { type: context.index.started,      family: context, scope: space }
+  - { type: context.index.completed,    family: context, scope: space }
+  - { type: context.index.failed,       family: context, scope: space }
+  - { type: context.snapshot.created,   family: context, scope: space }
+  - { type: context.retrieval.completed, family: context, scope: run }
+  - { type: wiki.generation.started,    family: wiki, scope: space }
+  - { type: wiki.page.completed,        family: wiki, scope: space }
+  - { type: wiki.generation.completed,  family: wiki, scope: space }
+  - { type: wiki.freshness.changed,     family: wiki, scope: space }
+
+  # -- Approval -----------------------------------------------------------------------------
+  - { type: approval.requested,         family: approval, scope: run, audit: true }
+  - { type: approval.expired,           family: approval, scope: run, audit: true }
+  - { type: approval.approved,          family: approval, scope: run, audit: true }
+  - { type: approval.denied,            family: approval, scope: run, audit: true }
+  - { type: approval.revoked,           family: approval, scope: run, audit: true }
+
+  # -- Worker and environment ---------------------------------------------------------------
+  - { type: worker.registered,          family: worker, scope: worker, audit: true }
+  - { type: worker.heartbeat,           family: worker, scope: worker }
+  - { type: worker.leased,              family: worker, scope: worker, audit: true }
+  - { type: worker.draining,            family: worker, scope: worker }
+  - { type: worker.offline,             family: worker, scope: worker, audit: true }
+  - { type: environment.build.started,  family: worker, scope: organization }
+  - { type: environment.build.completed, family: worker, scope: organization }
+  - { type: environment.build.failed,   family: worker, scope: organization }
+
+  # -- Artifact and review ------------------------------------------------------------------
+  - { type: artifact.created,           family: artifact, scope: run }
+  - { type: artifact.verified,          family: artifact, scope: run }
+  - { type: artifact.retention.changed, family: artifact, scope: organization, audit: true }
+  - { type: review.finding.created,     family: artifact, scope: run }
+  - { type: review.finding.updated,     family: artifact, scope: run }
+  - { type: review.completed,           family: artifact, scope: run }
+
+  # -- Settings and policy ------------------------------------------------------------------
+  - { type: settings.changed,           family: settings, scope: organization, audit: true }
+  - { type: settings.snapshot.created,  family: settings, scope: organization }
+  - { type: settings.migration.completed, family: settings, scope: organization, audit: true }
+  - { type: policy.bundle.published,    family: settings, scope: organization, audit: true }
+  - { type: policy.decision.created,    family: settings, scope: run, audit: true }
+
+  # -- Automation and integration -----------------------------------------------------------
+  - { type: external.event.received,    family: automation, scope: organization }
+  - { type: automation.matched,         family: automation, scope: space }
+  - { type: automation.dead_lettered,   family: automation, scope: space, audit: true }
+  - { type: integration.effect.requested, family: automation, scope: run, audit: true }
+  - { type: integration.effect.completed, family: automation, scope: run, audit: true }
+  - { type: integration.effect.failed,  family: automation, scope: run, audit: true }
+
+  # -- v5 additions -------------------------------------------------------------------------
+  - { type: mode.boundary.changed,      family: mode, scope: organization, audit: true }
+  - { type: instruction.manifest.created, family: mode, scope: run }
+  - { type: instruction.conflict.detected, family: mode, scope: run }
+  - { type: ripple.analysis.completed,  family: context, scope: run }
+  - { type: ripple.suggestion.accepted, family: context, scope: run }
+  - { type: security.scan.created,      family: security, scope: space, audit: true }
+  - { type: security.finding.created,   family: security, scope: space, audit: true }
+  - { type: security.validation.completed, family: security, scope: space, audit: true }
+  - { type: security.remediation.completed, family: security, scope: space, audit: true }
+  - { type: output.validated,           family: output, scope: run }
+  - { type: output.validation.failed,   family: output, scope: run }
+  - { type: deployment.plan.created,    family: deployment, scope: run, audit: true }
+  - { type: deployment.completed,       family: deployment, scope: run, audit: true }
+
+  # -- v5.1: memory and learning ------------------------------------------------------------
+  - { type: memory.candidate.created,   family: memory, scope: space }
+  - { type: memory.corroboration.updated, family: memory, scope: space }
+  - { type: memory.activated,           family: memory, scope: space, audit: true }
+  - { type: memory.suspended,           family: memory, scope: space, audit: true }
+  - { type: memory.rolled_back,         family: memory, scope: space, audit: true }
+  - { type: memory.promotion.requested, family: memory, scope: space, audit: true }
+  - { type: retrieval.adaptation.activated, family: memory, scope: organization, audit: true }
+
+  # -- v5.1: taint --------------------------------------------------------------------------
+  - { type: taint.class.entered,        family: taint, scope: run }
+  - { type: taint.escalation.applied,   family: taint, scope: run, audit: true }
+  - { type: taint.declassified,         family: taint, scope: run, audit: true }
+
+  # -- v5.1: trust --------------------------------------------------------------------------
+  - { type: trust.accrued,              family: trust, scope: organization, audit: true }
+  - { type: trust.downgraded,           family: trust, scope: organization, audit: true }
+  - { type: trust.reversed,             family: trust, scope: organization, audit: true }
+
+  # -- v5.1: coordination -------------------------------------------------------------------
+  - { type: coordination.scope.registered, family: coordination, scope: run }
+  - { type: coordination.overlap.detected, family: coordination, scope: run }
+  - { type: coordination.lock.acquired, family: coordination, scope: run, audit: true }
+  - { type: coordination.lock.released, family: coordination, scope: run, audit: true }
+  - { type: coordination.conflict.detected, family: coordination, scope: run, audit: true }
+  - { type: coordination.rebase.reverified, family: coordination, scope: run }
+
+  # -- v5.1: verification adequacy ----------------------------------------------------------
+  - { type: verification.adequacy.computed, family: verification, scope: run }
+  - { type: verification.adequacy.blocked, family: verification, scope: run, audit: true }
+
+  # -- v5.1: evaluation and routing ---------------------------------------------------------
+  - { type: evaluation.revision.detected, family: evaluation, scope: organization, audit: true }
+  - { type: evaluation.canary.started,  family: evaluation, scope: organization }
+  - { type: evaluation.canary.completed, family: evaluation, scope: organization }
+  - { type: evaluation.canary.failed,   family: evaluation, scope: organization, audit: true }
+  - { type: evaluation.shadow.completed, family: evaluation, scope: organization }
+  - { type: evaluation.gate.evaluated,  family: evaluation, scope: organization, audit: true }
+  - { type: evaluation.drift.alerted,   family: evaluation, scope: organization, audit: true }
+  - { type: routing.cascade.escalated,  family: evaluation, scope: run }
+
+  # -- v5.1: evidence export ----------------------------------------------------------------
+  - { type: evidence.export.requested,  family: evidence, scope: organization, audit: true }
+  - { type: evidence.export.completed,  family: evidence, scope: organization, audit: true }

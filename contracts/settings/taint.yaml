@@ -1,0 +1,89 @@
+# Settings namespace: taint.*
+#
+# Authority: PRD v5.1 §12A (TNT-1..TNT-7), SDD v5.1 §7 (new registry namespaces).
+# Procedure: .skills/taint-review/SKILL.md.
+#
+# TNT-4 is the default managed policy and is expressed here so an operator can tighten it but
+# never silently remove it: `taint.escalation.trigger_classes` uses union semantics, so a lower
+# scope can add trigger classes but cannot drop one a higher scope set.
+
+version: 1
+namespace: taint
+
+settings:
+  - key: taint.enforcement.enabled
+    type: bool
+    default: true
+    scopes: [organization, team, space]
+    merge: most_restrictive
+    restrictive_order: [true, false]
+    change_effect: next_run
+    security_class: critical
+    description: Enforce provenance taint as a policy dimension (TNT-3).
+
+  - key: taint.escalation.trigger_classes
+    type: string_list
+    default: [web, mcp_result, repository_untrusted]
+    scopes: [organization, team, space, agent_profile]
+    merge: union
+    change_effect: next_tool_call
+    security_class: critical
+    description: >-
+      Provenance classes that escalate approval class for externally compensatable and
+      externally irreversible operations (TNT-4). Scopes union; a class can be added but not
+      removed by a lower scope.
+
+  - key: taint.escalation.side_effect_classes
+    type: string_list
+    default: [externally_compensatable, externally_irreversible]
+    scopes: [organization, team, space]
+    merge: union
+    change_effect: next_tool_call
+    security_class: critical
+    description: Side-effect classes subject to taint escalation.
+
+  - key: taint.plan_declaration.exempts_escalation
+    type: bool
+    default: true
+    scopes: [organization, team, space]
+    merge: most_restrictive
+    restrictive_order: [false, true]
+    change_effect: next_tool_call
+    security_class: critical
+    description: >-
+      Honour the TNT-4 carve-out for operations declared in the approved plan before the taint
+      entered. Setting false removes the carve-out and is strictly more restrictive.
+
+  - key: taint.declassification.allowed
+    type: bool
+    default: false
+    scopes: [organization, team, space]
+    merge: most_restrictive
+    restrictive_order: [false, true]
+    change_effect: immediate
+    security_class: critical
+    description: Permit authorized declassification of tainted content (TNT-2).
+
+  - key: taint.declassification.min_role
+    type: enum
+    enum: [owner, security_admin, space_admin, maintainer]
+    default: security_admin
+    scopes: [organization, team, space]
+    merge: most_restrictive
+    restrictive_order: [owner, security_admin, space_admin, maintainer]
+    change_effect: immediate
+    security_class: critical
+    description: Lowest role that may record a declassification with actor and rationale.
+
+  - key: taint.unknown_provenance.class
+    type: enum
+    enum: [highest_risk, mcp_result, web, repository_untrusted]
+    default: highest_risk
+    scopes: [organization]
+    merge: override
+    change_effect: next_run
+    security_class: critical
+    description: >-
+      Class assigned to content whose provenance cannot be verified (TNT-6). The default resolves
+      to the highest-risk registered class; the alternatives exist only to pin a specific class
+      for audit clarity and can never resolve lower than the pinned value.

@@ -1,0 +1,31 @@
+# Build output
+/bin/
+/dist/
+/out/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Rust
+target/
+
+# Local settings and caches — never committed (R-SET-07: no secrets in settings)
+.modbit/settings.local.json
+.modbit/cache/
+*.local.json
+
+# Editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Environment — Modbit never reads secrets from ambient env (R-SEC-08); these are local tooling only
+.env
+.env.*

@@ -1,0 +1,34 @@
+# Capability: taint declassification.
+#
+# Source row: capability-matrix-v5.1.md "Taint declassification" — R on desktop, CLI, and SDK;
+# administrator-only on web; not applicable in extensions. Declassification is a privileged act
+# that must record an accountable actor and rationale (TNT-2), so it is never an extension gesture.
+
+id: taint.declassification
+version: 1
+owner: product-security
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§12A-TNT-2
+  - PRD-v5.1-§12A-TNT-5
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: admin_only
+  extension: not_applicable
+
+events:
+  - taint.declassified
+
+settings:
+  - taint.declassification.allowed
+  - taint.declassification.min_role
+
+tests:
+  - pkg/taint:TestDeclassifyRequiresAccountabilityAndLowersRisk
+  - conformance/taint-declassification
+  - security/taint-declassification-authorization

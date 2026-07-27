@@ -1,0 +1,129 @@
+# Settings namespace: execution.*
+#
+# Authority: PRD v5.1 §16 (execution and sandboxing), §20A.10 "Terminal, execution, and sandbox".
+# The sandbox settings are the enforcement surface behind SBX-3 and SBX-6: a control that cannot
+# be established fails closed unless policy explicitly permits degraded isolation.
+
+version: 1
+namespace: execution
+
+settings:
+  - key: execution.sandbox.enabled
+    type: bool
+    default: true
+    scopes: [organization, team, space, repository, agent_profile, user, device]
+    merge: most_restrictive
+    restrictive_order: [true, false]
+    change_effect: next_run
+    security_class: critical
+    description: Run tool execution inside a SandboxBackend.
+
+  - key: execution.sandbox.fail_closed
+    type: bool
+    default: true
+    scopes: [organization, team, space]
+    merge: most_restrictive
+    restrictive_order: [true, false]
+    change_effect: next_run
+    security_class: critical
+    description: Refuse execution when a mandatory sandbox control cannot be established (SBX-6).
+
+  - key: execution.sandbox.min_isolation
+    type: enum
+    enum: [none, process, container, microvm]
+    default: process
+    scopes: [organization, team, space, agent_profile]
+    merge: most_restrictive
+    restrictive_order: [microvm, container, process, none]
+    change_effect: next_run
+    security_class: critical
+    description: Minimum isolation strength a backend must report to be eligible (SBX-4).
+
+  - key: execution.filesystem.write_roots
+    type: string_list
+    default: ["${workspace}"]
+    scopes: [organization, team, space, repository, agent_profile, repository_local]
+    merge: intersection
+    change_effect: next_run
+    security_class: critical
+    description: Absolute or workspace-relative roots the sandbox may write to.
+
+  - key: execution.filesystem.protected_paths
+    type: string_list
+    default: ["**/.git/**", "**/.ssh/**", "**/.aws/**", "**/*.pem", "**/*.key"]
+    scopes: [organization, team, space, repository, agent_profile, repository_local]
+    merge: union_deny
+    change_effect: next_run
+    security_class: critical
+    description: Paths no tool may read or write regardless of write roots.
+
+  - key: execution.network.mode
+    type: enum
+    enum: [none, allowlist, proxy, open]
+    default: allowlist
+    scopes: [organization, team, space, repository, agent_profile]
+    merge: most_restrictive
+    restrictive_order: [none, allowlist, proxy, open]
+    change_effect: next_run
+    security_class: critical
+    description: Egress posture for sandboxed processes.
+
+  - key: execution.network.allowed_domains
+    type: string_list
+    default: []
+    scopes: [organization, team, space, repository, agent_profile]
+    merge: intersection
+    change_effect: next_run
+    security_class: critical
+    description: Domains reachable in allowlist mode. Scopes intersect.
+
+  - key: execution.network.denied_domains
+    type: string_list
+    default: []
+    scopes: [organization, team, space, repository, agent_profile, repository_local]
+    merge: union_deny
+    change_effect: next_run
+    security_class: critical
+    description: Domains never reachable, overriding any allowlist.
+
+  - key: execution.limits.wall_time_seconds
+    type: int
+    default: 1800
+    min: 1
+    max: 86400
+    scopes: [organization, team, space, agent_profile, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: high
+    description: Wall-clock ceiling for a single sandboxed process.
+
+  - key: execution.limits.memory_mb
+    type: int
+    default: 4096
+    min: 64
+    max: 1048576
+    scopes: [organization, team, space, agent_profile, device]
+    merge: minimum
+    change_effect: next_run
+    security_class: medium
+    description: Memory ceiling for a single sandboxed process.
+
+  - key: execution.dangerous_commands
+    type: enum
+    enum: [deny, approve, allow]
+    default: approve
+    scopes: [organization, team, space, repository, agent_profile, repository_local]
+    merge: most_restrictive
+    restrictive_order: [deny, approve, allow]
+    change_effect: next_tool_call
+    security_class: critical
+    description: Handling for commands classified as destructive or privilege changing.
+
+  - key: execution.commands_outside_sandbox
+    type: string_list
+    default: []
+    scopes: [organization, team, space]
+    merge: intersection
+    change_effect: next_tool_call
+    security_class: critical
+    description: Explicit escape hatch. Every entry is audited on use; empty is the safe default.

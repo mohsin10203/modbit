@@ -1,0 +1,316 @@
+# Modbit stable error codes.
+#
+# Authority: api-and-events-v5.1.md §6 (error model) and §"v5.1 error codes".
+# Rules: R-ERR-01 (stable code across process boundaries), R-ERR-02 (no sensitive details).
+#
+# `detail_keys` is an allowlist. pkg/modberr refuses to attach any detail key that is not
+# listed here, which is the mechanical control behind R-ERR-02 — an implementer cannot slip a
+# secret, prompt, or token into an error payload by inventing a key.
+#
+# Codes are append-only. Retire with `deprecated: true`; never renumber or reuse.
+
+version: 1
+
+codes:
+  # -- Request validation -------------------------------------------------------------------
+  - code: MODBIT_INVALID_ARGUMENT
+    http_status: 400
+    retryable: false
+    description: The request was malformed or violated a field constraint.
+    detail_keys: [field, constraint]
+
+  - code: MODBIT_UNSUPPORTED_VERSION
+    http_status: 400
+    retryable: false
+    description: The requested API, event, schema, or worker protocol version is not supported.
+    detail_keys: [requested_version, supported_versions]
+
+  - code: MODBIT_CONTRACT_VALIDATION_FAILED
+    http_status: 422
+    retryable: false
+    description: A structured artifact failed validation against its Structured Output Contract.
+    detail_keys: [schema_id, schema_version, artifact_id, violation_count]
+
+  # -- Identity and authorization -----------------------------------------------------------
+  - code: MODBIT_UNAUTHENTICATED
+    http_status: 401
+    retryable: false
+    description: No valid credential was presented.
+    detail_keys: [scheme]
+
+  - code: MODBIT_PERMISSION_DENIED
+    http_status: 403
+    retryable: false
+    description: The authenticated actor lacks permission for this operation.
+    detail_keys: [required_role, resource_type]
+
+  - code: MODBIT_TENANT_MISMATCH
+    http_status: 403
+    retryable: false
+    description: The referenced resource belongs to a different organization or Space.
+    detail_keys: [resource_type]
+
+  # -- Policy and approval ------------------------------------------------------------------
+  - code: MODBIT_POLICY_DENIED
+    http_status: 403
+    retryable: false
+    description: Operation denied by policy.
+    detail_keys: [policy_decision_id, rule_id, side_effect_class]
+
+  - code: MODBIT_APPROVAL_REQUIRED
+    http_status: 428
+    retryable: false
+    description: The operation requires human approval before it may proceed.
+    detail_keys: [policy_decision_id, approval_id, approval_class, side_effect_class]
+
+  - code: MODBIT_APPROVAL_DENIED
+    http_status: 403
+    retryable: false
+    description: A required approval was denied or revoked.
+    detail_keys: [policy_decision_id, approval_id]
+
+  - code: MODBIT_APPROVAL_INVALIDATED
+    http_status: 409
+    retryable: false
+    description: The operation changed after approval; the prior approval no longer binds (SFX-4).
+    # fence_epoch distinguishes a stale lease from a changed operation: both invalidate the
+    # approval, but only one means the work was reassigned to another worker.
+    #
+    # It is named "epoch", not "token", deliberately. Two different things are conflated in the
+    # literature: the fencing value is a monotonically increasing counter and is not secret, while a
+    # lease *token* is bearer material that must never appear in an error at all. The R-ERR-02 key
+    # guard rejects anything containing "token", and that guard is correct — the fix is to name the
+    # non-secret value precisely rather than to carve an exception into the control.
+    detail_keys:
+      [approval_id, expected_operation_hash, actual_operation_hash, fence_epoch, approval_scope]
+
+  - code: MODBIT_TAINT_ESCALATION_REQUIRED
+    http_status: 428
+    retryable: false
+    description: Operation requires elevated approval due to taint state.
+    detail_keys:
+      [policy_decision_id, approval_class, escalated_from, taint_classes, side_effect_class]
+
+  # -- Settings -----------------------------------------------------------------------------
+  - code: MODBIT_SETTING_UNKNOWN
+    http_status: 400
+    retryable: false
+    description: The settings key is not present in the Settings Registry.
+    detail_keys: [setting_key]
+
+  - code: MODBIT_SETTING_INVALID
+    http_status: 400
+    retryable: false
+    description: The settings value failed type, enum, or range validation.
+    detail_keys: [setting_key, setting_scope, expected_type]
+
+  - code: MODBIT_SETTING_LOCKED
+    http_status: 403
+    retryable: false
+    description: A higher settings scope locks this key; lower scopes cannot change it.
+    detail_keys: [setting_key, locked_by_scope]
+
+  - code: MODBIT_SETTING_POLICY_VIOLATION
+    http_status: 403
+    retryable: false
+    description: The value falls outside the compiled policy envelope for this key.
+    detail_keys: [setting_key, setting_scope, envelope_source_scope]
+
+  # -- Runs and orchestration ---------------------------------------------------------------
+  - code: MODBIT_RUN_NOT_FOUND
+    http_status: 404
+    retryable: false
+    description: The run does not exist or is not visible to the actor.
+    detail_keys: [run_id]
+
+  - code: MODBIT_RUN_STATE_INVALID
+    http_status: 409
+    retryable: false
+    description: The command is not valid for the run's current phase.
+    detail_keys: [run_id, current_phase, requested_command]
+
+  - code: MODBIT_TRANSITION_LEASE_HELD
+    http_status: 409
+    retryable: true
+    description: Another transition lease is active for this run (R-EVT-06).
+    detail_keys: [run_id, lease_expires_at]
+
+  - code: MODBIT_SEQUENCE_CONFLICT
+    http_status: 409
+    retryable: true
+    description: The event sequence allocated for this run is no longer current.
+    detail_keys: [run_id, expected_sequence, actual_sequence]
+
+  - code: MODBIT_IDEMPOTENCY_CONFLICT
+    http_status: 409
+    retryable: false
+    description: The idempotency key was reused with a different request body.
+    detail_keys: [idempotency_key]
+
+  - code: MODBIT_BUDGET_EXHAUSTED
+    http_status: 402
+    retryable: false
+    description: The run, Space, or organization budget is exhausted.
+    detail_keys: [budget_id, budget_scope]
+
+  - code: MODBIT_CANCELLED
+    http_status: 499
+    retryable: false
+    description: The operation was cancelled by an actor or a parent run.
+    detail_keys: [run_id, cancelled_by]
+
+  - code: MODBIT_SUPERSEDED
+    http_status: 409
+    retryable: false
+    description: The operation was superseded by a later instruction or run.
+    detail_keys: [run_id, superseded_by]
+
+  - code: MODBIT_SNAPSHOT_DIVERGED
+    http_status: 412
+    retryable: false
+    description: The repository revision or unsaved overlay no longer matches the run's snapshot.
+    detail_keys: [run_id, expected_revision, actual_revision, resource_type]
+
+  - code: MODBIT_EFFECT_RECONCILIATION_REQUIRED
+    http_status: 409
+    retryable: false
+    # An effect whose receipt is missing must never be blindly repeated: the external system may
+    # already have performed it. Reconciliation is a distinct recovery path, not a retry (RCV-5).
+    description: An external effect may have occurred but its receipt is missing; reconcile before retrying.
+    detail_keys: [run_id, step_id, effect_key, integration_id]
+
+  - code: MODBIT_CONTEXT_DEGRADED
+    http_status: 206
+    retryable: true
+    # SDD §15 requires index failures to degrade visibly. Without a code for it, a partial
+    # retrieval is indistinguishable from a complete one, which is a silent degradation (R-ERR-05).
+    description: One or more retrieval channels are unavailable; the response declares the degradation.
+    detail_keys: [degraded_channels, healthy_channels, space_id]
+
+  - code: MODBIT_REVERSION_INCOMPLETE
+    http_status: 409
+    retryable: false
+    description: Safe restoration could not be proven; the run entered reversion_incomplete (RCV-7).
+    detail_keys: [run_id, checkpoint_id, unresolved_count]
+
+  # -- Verification -------------------------------------------------------------------------
+  - code: MODBIT_ADEQUACY_THRESHOLD_FAILED
+    http_status: 422
+    retryable: false
+    description: Evidence below configured adequacy threshold.
+    detail_keys: [run_id, adequacy_method, score, threshold]
+
+  - code: MODBIT_EVIDENCE_MISSING
+    http_status: 422
+    retryable: false
+    description: Completion was claimed without the evidence its completion contract requires.
+    detail_keys: [run_id, contract_id, missing_evidence_kind]
+
+  # -- Coordination -------------------------------------------------------------------------
+  - code: MODBIT_COORDINATION_CONFLICT
+    http_status: 409
+    retryable: false
+    description: Unresolved semantic conflict blocks the operation.
+    detail_keys: [conflict_id, conflicting_run_id, scope_kind]
+
+  - code: MODBIT_COORDINATION_UNAVAILABLE
+    http_status: 503
+    retryable: true
+    description: The coordination service is unavailable and the run has registered overlaps (CRC-3).
+    detail_keys: [run_id]
+
+  # -- Model gateway and inference ----------------------------------------------------------
+  - code: MODBIT_DLP_BLOCKED
+    http_status: 422
+    retryable: false
+    description: The outbound payload was blocked by classification or DLP (INV-3).
+    detail_keys: [policy_decision_id, classification, rule_id]
+
+  - code: MODBIT_DLP_UNAVAILABLE
+    http_status: 503
+    retryable: true
+    description: Classification or DLP could not complete; the gateway failed closed.
+    detail_keys: [reason_class]
+
+  - code: MODBIT_NO_ELIGIBLE_ROUTE
+    http_status: 422
+    retryable: false
+    description: No model route satisfies the required capabilities within the policy envelope.
+    # rejected_models lists model ids with their rejection reason so an operator can see why an
+    # envelope excluded every candidate. Model ids and reason phrases only; no request content.
+    detail_keys: [required_capabilities, policy_decision_id, rejected_models]
+
+  - code: MODBIT_PROVIDER_UNAVAILABLE
+    http_status: 502
+    retryable: true
+    description: The upstream model provider is unavailable or returned a transport failure.
+    detail_keys: [provider_id, upstream_class]
+
+  - code: MODBIT_CANARY_HOLD
+    http_status: 503
+    retryable: true
+    description: Route held pending canary passage.
+    detail_keys: [route_id, provider_revision, canary_id]
+
+  # -- Capability and mode ------------------------------------------------------------------
+  - code: MODBIT_CAPABILITY_UNAVAILABLE
+    http_status: 409
+    retryable: false
+    description: Negotiated capability set does not include the operation.
+    detail_keys: [capability_id, operating_mode]
+
+  # -- Execution ----------------------------------------------------------------------------
+  - code: MODBIT_SANDBOX_UNAVAILABLE
+    http_status: 503
+    retryable: false
+    description: A mandatory sandbox control could not be established; execution failed closed (SBX-6).
+    detail_keys: [backend, missing_control]
+
+  - code: MODBIT_LEASE_EXPIRED
+    http_status: 409
+    retryable: false
+    description: The worker or workspace lease expired before the operation completed.
+    detail_keys: [lease_id, expired_at]
+
+  - code: MODBIT_WORKER_UNAVAILABLE
+    http_status: 503
+    retryable: true
+    description: No eligible worker is available for the environment requirements.
+    detail_keys: [environment_id, pool_id]
+
+  # -- Generic ------------------------------------------------------------------------------
+  - code: MODBIT_NOT_FOUND
+    http_status: 404
+    retryable: false
+    description: The resource does not exist or is not visible to the actor.
+    detail_keys: [resource_type]
+
+  - code: MODBIT_CONFLICT
+    http_status: 409
+    retryable: false
+    description: The resource changed concurrently; the precondition no longer holds.
+    detail_keys: [resource_type, expected_version]
+
+  - code: MODBIT_RATE_LIMITED
+    http_status: 429
+    retryable: true
+    description: The actor exceeded a rate limit.
+    detail_keys: [limit_scope, retry_after_seconds]
+
+  - code: MODBIT_TIMEOUT
+    http_status: 504
+    retryable: true
+    description: The operation exceeded its deadline.
+    detail_keys: [operation, deadline_seconds]
+
+  - code: MODBIT_UNAVAILABLE
+    http_status: 503
+    retryable: true
+    description: A dependency is unavailable. The caller may retry within its attempt budget.
+    detail_keys: [dependency]
+
+  - code: MODBIT_INTERNAL
+    http_status: 500
+    retryable: false
+    description: An unexpected internal condition occurred. Details are recorded in the trace only.
+    detail_keys: []

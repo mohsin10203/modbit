@@ -1,0 +1,113 @@
+# Settings namespace: context.*
+#
+# Authority: PRD v5.1 §9 (Context Engine), §20A.10 "Context and indexing".
+
+version: 1
+namespace: context
+
+settings:
+  - key: context.indexing.enabled
+    type: bool
+    default: true
+    scopes: [organization, team, space, repository, user, device, repository_local]
+    merge: override
+    change_effect: next_index
+    security_class: medium
+    description: Build and maintain local retrieval indexes for registered sources.
+
+  - key: context.indexing.location
+    type: enum
+    enum: [local, remote, hybrid]
+    default: local
+    scopes: [organization, team, space, repository, device]
+    merge: most_restrictive
+    restrictive_order: [local, hybrid, remote]
+    change_effect: next_index
+    security_class: critical
+    description: Where index segments are built and stored. Local is the most restrictive boundary.
+
+  - key: context.indexing.max_file_bytes
+    type: int
+    default: 1048576
+    min: 1024
+    max: 268435456
+    scopes: [organization, team, space, repository, repository_local]
+    merge: minimum
+    change_effect: next_index
+    security_class: low
+    description: Files larger than this are referenced but not parsed or embedded.
+
+  - key: context.indexing.respect_gitignore
+    type: bool
+    default: true
+    scopes: [organization, team, space, repository, user, repository_local]
+    merge: most_restrictive
+    restrictive_order: [true, false]
+    change_effect: next_index
+    security_class: high
+    description: Exclude gitignored paths from indexing and retrieval.
+
+  - key: context.indexing.excluded_globs
+    type: string_list
+    default: ["**/node_modules/**", "**/target/**", "**/.venv/**", "**/dist/**"]
+    scopes: [organization, team, space, repository, repository_local]
+    merge: union
+    change_effect: next_index
+    security_class: medium
+    description: Additional exclusion patterns, unioned across scopes.
+
+  - key: context.retrieval.budget_tokens
+    type: int
+    default: 32000
+    min: 512
+    max: 2000000
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: low
+    description: Token budget for one assembled context pack.
+
+  - key: context.retrieval.rerank_depth
+    type: int
+    default: 50
+    min: 1
+    max: 500
+    scopes: [organization, team, space, agent_profile, session]
+    merge: minimum
+    change_effect: next_run
+    security_class: low
+    description: Number of candidates passed to reranking before token-budget packing.
+
+  - key: context.sources.enabled
+    type: string_list
+    default:
+      [current_file, open_files, selection, recent_edits, git_diff, diagnostics, codewiki]
+    scopes: [organization, team, space, agent_profile, user, session]
+    merge: intersection
+    change_effect: next_run
+    security_class: high
+    description: >-
+      Context source kinds eligible for retrieval. Scopes intersect so an administrator can
+      remove a source class that a user cannot restore.
+
+  - key: context.sources.terminal_history
+    type: bool
+    default: false
+    scopes: [organization, team, space, user, device, repository_local]
+    merge: most_restrictive
+    restrictive_order: [false, true]
+    change_effect: next_run
+    security_class: critical
+    description: >-
+      Include terminal selections and recent commands in retrieval. Off by default because shell
+      history is a common secret-bearing surface (INV-11).
+
+  - key: context.sources.clipboard
+    type: bool
+    default: false
+    scopes: [user, device, session]
+    merge: most_restrictive
+    restrictive_order: [false, true]
+    change_effect: immediate
+    security_class: critical
+    description: Include clipboard contents. Requires explicit opt-in at every use.
