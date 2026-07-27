@@ -4,7 +4,7 @@ import (
 	"context"
 	"regexp"
 	"sort"
-	"strings"
+	"strconv"
 
 	"github.com/modbit/modbit/pkg/inference"
 	"github.com/modbit/modbit/pkg/modberr"
@@ -220,7 +220,7 @@ func (p *PatternInspector) Inspect(ctx context.Context, req inference.Request) (
 	for i, m := range req.Messages {
 		redacted.Messages[i] = inference.Message{
 			Role:  m.Role,
-			Parts: scanParts(m.Parts, "messages["+itoa(i)+"]", scan),
+			Parts: scanParts(m.Parts, "messages["+strconv.Itoa(i)+"]", scan),
 		}
 	}
 
@@ -252,7 +252,7 @@ func scanParts(parts []inference.Part, prefix string, scan func(text, location s
 	out := make([]inference.Part, len(parts))
 	copy(out, parts)
 	for i := range out {
-		location := prefix + ".parts[" + itoa(i) + "]"
+		location := prefix + ".parts[" + strconv.Itoa(i) + "]"
 		switch out[i].Kind {
 		case inference.PartText:
 			out[i].Text = scan(out[i].Text, location)
@@ -271,20 +271,4 @@ func scanParts(parts []inference.Part, prefix string, scan func(text, location s
 		}
 	}
 	return out
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b strings.Builder
-	digits := make([]byte, 0, 8)
-	for n > 0 {
-		digits = append(digits, byte('0'+n%10))
-		n /= 10
-	}
-	for i := len(digits) - 1; i >= 0; i-- {
-		b.WriteByte(digits[i])
-	}
-	return b.String()
 }

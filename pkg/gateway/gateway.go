@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/modbit/modbit/pkg/event"
 	"github.com/modbit/modbit/pkg/id"
 	"github.com/modbit/modbit/pkg/inference"
 	"github.com/modbit/modbit/pkg/modberr"
@@ -61,7 +62,10 @@ type SpendReporter interface {
 // become durable. A recording failure does not fail the call — the completion already happened, and
 // pretending otherwise would be dishonest — but it is surfaced on the result.
 type Recorder interface {
-	Record(ctx context.Context, call ModelCall) error
+	// Record persists the call metadata and its canonical events as one atomic act (R-EVT-04). A
+	// production implementation writes both inside a single transaction alongside the outbox row,
+	// so a recorded call can never exist without its event, nor an event without its call.
+	Record(ctx context.Context, call ModelCall, events []event.Envelope) error
 }
 
 // Clock supplies time. Injected so metadata and cost decisions are reproducible in tests.
@@ -78,6 +82,9 @@ type Options struct {
 	Broker    CredentialBroker
 	Spend     SpendReporter
 	Recorder  Recorder
+	// Sequencer issues the strictly monotonic per-run event sequence. Required whenever a Recorder
+	// is configured, since every gateway event is run scoped.
+	Sequencer event.Sequencer
 	Clock     Clock
 	Generator *id.Generator
 	// ConsumerStallTimeout bounds how long a stream waits for a consumer that stopped reading
@@ -97,6 +104,7 @@ type Gateway struct {
 	broker               CredentialBroker
 	spend                SpendReporter
 	recorder             Recorder
+	sequencer            event.Sequencer
 	clock                Clock
 	generator            *id.Generator
 	maxAttempts          int
@@ -118,6 +126,11 @@ func New(opts Options) (*Gateway, error) {
 	case opts.Broker == nil:
 		return nil, modberr.New(modberr.CodeInvalidArgument,
 			"gateway requires a credential broker; provider credentials exist only inside this boundary")
+	case opts.Recorder != nil && opts.Sequencer == nil:
+		// Run-scoped events without a monotonic sequence produce a log that cannot be reassembled
+		// (R-EVT-01, R-EVT-07). Refusing at construction beats discovering it on the first call.
+		return nil, modberr.New(modberr.CodeInvalidArgument,
+			"a gateway with a recorder requires a sequence authority for its run events")
 	}
 	g := &Gateway{
 		registry:             opts.Registry,
@@ -125,6 +138,7 @@ func New(opts Options) (*Gateway, error) {
 		broker:               opts.Broker,
 		spend:                opts.Spend,
 		recorder:             opts.Recorder,
+		sequencer:            opts.Sequencer,
 		clock:                opts.Clock,
 		generator:            opts.Generator,
 		maxAttempts:          opts.MaxRouteAttempts,
@@ -150,6 +164,11 @@ type Call struct {
 	OrganizationID id.ID
 	// Settings is the run's frozen settings snapshot (INV-6).
 	Settings settings.Snapshot
+	// SpaceID scopes run events. Required when the gateway emits canonical events, because a
+	// run-scoped envelope without it cannot be authorized or filtered per Space (R-TEN-01).
+	SpaceID id.ID
+	// CorrelationID ties every event produced while servicing one originating command.
+	CorrelationID id.ID
 	// PolicyDecisionID links the call to the decision that authorized it.
 	PolicyDecisionID id.ID
 	// Taint is the highest-risk provenance class in the request context, recorded on the metadata.
@@ -237,6 +256,9 @@ func (g *Gateway) Complete(ctx context.Context, c Call) (Result, error) {
 
 // prepared carries the pipeline state between the preparation and execution phases.
 type prepared struct {
+	// callID identifies this invocation from before any provider is contacted, so a failure at any
+	// later point still has something to attribute usage and events to.
+	callID         id.ID
 	request        inference.Request
 	classification Classification
 	findings       []Finding
@@ -258,13 +280,17 @@ func (g *Gateway) prepare(ctx context.Context, c Call) (prepared, error) {
 	if err := c.Request.Validate(); err != nil {
 		return prepared{}, err
 	}
+	callID, err := g.generator.New(id.ModelCall)
+	if err != nil {
+		return prepared{}, modberr.Wrap(err, modberr.CodeInternal, "allocate model-call identifier")
+	}
 
 	req := c.Request
 	var policyLosses []inference.Loss
 
 	// 1. Settings and policy validation.
-	allowedAliases, err := c.Settings.StringList(settings.KeyModelAliasesAllowed)
-	if err != nil {
+	allowedAliases, aliasErr := c.Settings.StringList(settings.KeyModelAliasesAllowed)
+	if err := aliasErr; err != nil {
 		return prepared{}, err
 	}
 	if !aliasPermitted(allowedAliases, req.Alias) {
@@ -337,6 +363,7 @@ func (g *Gateway) prepare(ctx context.Context, c Call) (prepared, error) {
 	}
 
 	return prepared{
+		callID:         callID,
 		request:        req,
 		classification: verdict.Classification,
 		findings:       verdict.Findings,
@@ -369,13 +396,13 @@ func (g *Gateway) constraints(snapshot settings.Snapshot) (inference.Constraints
 // checkBudget enforces the per-run cost cap. A spend lookup that fails refuses the call: an
 // unenforceable cap is not a cap.
 func (g *Gateway) checkBudget(ctx context.Context, c Call, candidate inference.Candidate) (inference.Money, error) {
-	cap, err := c.Settings.Int(settings.KeyModelCostCapPerRunMicros)
+	ceiling, err := c.Settings.Int(settings.KeyModelCostCapPerRunMicros)
 	if err != nil {
 		return inference.Money{}, err
 	}
 	// Estimate on the input side only; output length is unknown before the call.
 	estimated := candidate.Model.EstimateCost(inference.Usage{InputTokens: estimateInputTokens(c.Request)})
-	if cap <= 0 {
+	if ceiling <= 0 {
 		return estimated, nil
 	}
 	if g.spend == nil {
@@ -387,10 +414,10 @@ func (g *Gateway) checkBudget(ctx context.Context, c Call, candidate inference.C
 			"could not read accumulated run spend; the cost cap could not be enforced").
 			WithDetail("dependency", "spend_reporter")
 	}
-	if spent.Micros+estimated.Micros > cap {
+	if spent.Micros+estimated.Micros > ceiling {
 		return inference.Money{}, modberr.Newf(modberr.CodeBudgetExhausted,
 			"run spend %d plus estimated %d exceeds the per-run cap %d micros",
-			spent.Micros, estimated.Micros, cap).
+			spent.Micros, estimated.Micros, ceiling).
 			WithDetail("budget_scope", "run")
 	}
 	return estimated, nil
@@ -413,9 +440,22 @@ func (g *Gateway) finish(ctx context.Context, c Call, p prepared, candidate infe
 		// A recording failure does not invalidate a completion that already happened. Reporting it
 		// separately lets the caller decide whether missing evidence blocks its completion contract
 		// (INV-8) rather than having the gateway silently decide for it.
-		result.RecordingErr = g.recorder.Record(ctx, call)
+		result.RecordingErr = g.record(ctx, c, call, nil)
 	}
 	return result, nil
+}
+
+// record persists metadata and its canonical events together.
+//
+// Event construction failures are folded into the recording error rather than raised separately:
+// from the caller's point of view both mean the same thing, that the evidence for this call is
+// incomplete.
+func (g *Gateway) record(ctx context.Context, c Call, call ModelCall, cause error) error {
+	events, err := g.buildEvents(c, call, cause, g.sequenceAllocator(ctx, c.Request.RunID))
+	if err != nil {
+		return modberr.Wrap(err, modberr.CodeInternal, "build canonical events for the model call")
+	}
+	return g.recorder.Record(ctx, call, events)
 }
 
 // buildCall assembles model-call metadata.
@@ -427,14 +467,8 @@ func (g *Gateway) buildCall(c Call, p prepared, candidate inference.Candidate,
 	finish inference.FinishReason, usage inference.Usage, losses []inference.Loss,
 	failovers []Failover, started time.Time, observedRevision string) ModelCall {
 
-	callID, err := g.generator.New(id.ModelCall)
-	if err != nil {
-		// Metadata must exist even when identifier allocation fails: an unattributed call is worse
-		// than one with a zero id, because the usage is invisible rather than merely unlabelled.
-		callID = ""
-	}
 	return ModelCall{
-		ID:                 callID,
+		ID:                 p.callID,
 		OrganizationID:     c.OrganizationID,
 		RunID:              c.Request.RunID,
 		StepID:             c.Request.StepID,

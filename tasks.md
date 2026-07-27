@@ -51,7 +51,7 @@ Docket: `SET-A01`, `QA-A01` precursors. PRD: §20A (settings), §26 (API/events)
 | FND-07 | `tools/modbitgen` — Go + TS generation from `contracts/` | R-CTR-02/03 | ✅ Qualified | `tools/modbitgen`, 20 validation tests |
 | FND-08 | `pkg/taint` — provenance classes, lattice, propagation, ledger | TNT-1, TNT-2, TNT-6 | ✅ Qualified | `pkg/taint`, 24 tests |
 | FND-09 | `pkg/policy` — side-effect classes, decision engine, taint escalation | SFX-1..5, TNT-3/4 | ✅ Qualified | `pkg/policy`, 34 tests incl. TNT-7 adversarial suite |
-| FND-10 | `make check` wiring + generated-code drift gate + error-contract freeze | R-CTR-03, R-CTR-04 | ✅ Qualified | `make check` green — 348 assertions, `-race` clean |
+| FND-10 | `make check` wiring + generated-code drift gate + error-contract freeze | R-CTR-03, R-CTR-04 | ✅ Qualified | `make check` green — 357 assertions, `-race` clean |
 
 ### FND acceptance
 
@@ -182,6 +182,26 @@ A test without an S-number, or an S-number without a test, is a gap.
 | 30 | A provider stream closing with no terminal event is a **failure**, not a success | Reporting it as success would let a truncated answer pass as a whole one. |
 | 31 | `buildCall` is shared by `Complete` and the pump | Divergence would mean the same call recorded two different ways depending on which surface the caller used. |
 
+### MOD-A01j event emission
+
+| # | Decision | Rationale |
+|---|---|---|
+| 32 | `Recorder.Record` takes the metadata **and** its events, written as one act | R-EVT-04 requires the state write and event publication to be atomic. The gateway's state write *is* the `ModelCall`, so a separate publisher would reintroduce exactly the failure the rule prevents: a recorded call with no event, or an event for a call never recorded. |
+| 33 | Only **terminal** events are emitted — not `model.requested`, `model.routed`, or `model.stream.delta` | A delta event per token would put a durable, sequenced, tenant-scoped envelope in the log for every few characters, all carrying content the log is forbidden to hold (INV-4); deltas are a live-observation concern served by the streaming surface. `requested` and `routed` carry nothing the `ModelCall` does not already hold, and emitting them before the outcome creates orphans a consumer cannot distinguish from a call still in flight. |
+| 34 | A `Recorder` without a `Sequencer` is refused at construction | Run-scoped events without a monotonic sequence produce a log that cannot be reassembled (R-EVT-01, R-EVT-07). Refusing at construction beats discovering it on the first call. |
+| 35 | Revision drift emits an **organization-scoped** event | A revision roll affects every run routed to that model, not just the one that happened to notice. |
+
+### Bug sweep (2026-07-27)
+
+| # | Defect | Impact | Fix |
+|---|---|---|---|
+| B-6 | `buildCall` swallowed a failed identifier allocation and emitted an empty `ModelCall.ID` | A regression from the `Complete`/`Stream` refactor: the pre-refactor code returned `MODBIT_INTERNAL`. An unreferenceable metadata record is a silent degradation (R-ERR-05). | The call identifier is now allocated in `prepare`, before any provider is contacted. It cannot fail late, and it gives events something to correlate on from the first moment — which MOD-A01j needed anyway. |
+| B-7 | Terminal stream event dropped on cancellation | `sendTerminal` selected on `ctx.Done()`; with an already-closed context `select` picks randomly between ready cases, so a cancelled stream *sometimes* closed with no terminal event. The cancellation test had been passing by luck. | Terminal delivery no longer consults the context, bounded only by the stall timer. Caught by the `drain` helper enforcing S4 on every use. |
+| B-8 | A non-streaming candidate consumed a failover attempt | Two non-streaming candidates could exhaust the attempt budget before any provider was contacted, since the check performs no I/O. | Capability mismatches are filtered before the budget is charged. |
+| B-9 | `cap` shadowed the builtin in `checkBudget` | Legal but a trap for the next reader. | Renamed to `ceiling`. |
+| B-10 | Three hand-rolled integer formatters (`formatUint` ×2, `itoa`) | Each reimplements `strconv` and is a place a subtle bug can hide for no benefit. | Replaced with `strconv`. |
+| B-11 | `observedRevision` took an unused `candidate` parameter | Dead weight that implies a dependency that does not exist. | Removed. |
+
 **Deferred to later ADRs:** retrieval ranking and coverage-constrained packing · routing utility and
 bandit calibration · memory scoring and decay · planner portfolio · effect reconciliation protocol ·
 benchmark factory and judge calibration · Pareto-safe promotion and canary rollback.
@@ -222,7 +242,7 @@ Capability registry entry: `contracts/capabilities/model.canonical-ir.yaml`.
 | MOD-A01g | First provider adapter + OpenAI-compatible local endpoint | §14.1 | ⬜ Ready | |
 | MOD-A01h | Provider credential boundary | INV-2, SDD §10 | ✅ Qualified | `pkg/inference/credential.go`, `TestCredentialResistsAccidentalDisclosure` |
 | MOD-A01i | Gateway streaming pipeline: S1–S10 protocol, cancellation, backpressure, stall abandonment | SDD §10 | ✅ Qualified | `pkg/gateway/streaming.go`, 16 protocol tests + `stream_terminal_contract` conformance case |
-| MOD-A01j | Canonical event emission from the gateway (`model.requested`/`routed`/`completed`/`failed_over`, `evaluation.revision.detected`) | INV-5, OEV-1 | ⬜ Ready | metadata already carries declared vs observed revision |
+| MOD-A01j | Canonical event emission, written atomically with the metadata | INV-5, R-EVT-04, OEV-1 | ✅ Qualified | `pkg/gateway/events.go`, 9 assertions |
 | MOD-A01k | Provider egress allowlist and no-filesystem-mounts deployment posture | SDD §10 | ⬜ Ready | deployment-level control, not a library one |
 
 **MOD-A01e — conformance suite design**

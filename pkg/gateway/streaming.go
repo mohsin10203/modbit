@@ -105,11 +105,9 @@ func (g *Gateway) Stream(ctx context.Context, c Call) (<-chan StreamEvent, error
 		failovers []Failover
 	)
 	for _, candidate := range prepared.candidates {
-		if attempts >= g.maxAttempts {
-			break
-		}
-		attempts++
-
+		// A capability mismatch is decided locally and performs no I/O, so it is filtered before
+		// the attempt budget is charged. Spending an attempt on it would let two non-streaming
+		// candidates exhaust the budget before any provider was contacted.
 		if !candidate.Model.SupportsStreaming {
 			failovers = append(failovers, Failover{
 				ProviderID: candidate.Model.ProviderID, ModelID: candidate.Model.ModelID,
@@ -119,6 +117,11 @@ func (g *Gateway) Stream(ctx context.Context, c Call) (<-chan StreamEvent, error
 				WithDetail("required_capabilities", "streaming")
 			continue
 		}
+
+		if attempts >= g.maxAttempts {
+			break
+		}
+		attempts++
 
 		cred, err := g.broker.Lease(ctx, candidate.Model.ProviderID)
 		if err != nil {
@@ -217,19 +220,19 @@ func (g *Gateway) pump(ctx context.Context, c Call, p prepared, candidate infere
 	// even when the consumer has gone (S6): usage was incurred and must be attributed regardless of
 	// whether anyone is left to hear about it.
 	terminate := func(resp *inference.Response, cause error) {
-		finish := inference.FinishError
 		usage := inference.Usage{}
 		if resp != nil {
-			finish, usage = resp.FinishReason, resp.Usage
-		} else if modberr.Is(cause, modberr.CodeCancelled) {
-			finish = inference.FinishCancelled
+			usage = resp.Usage
 		}
 
-		call := g.buildCall(c, p, candidate, finish, usage, respLosses(resp, p), failovers,
-			started, observedRevision(resp, candidate))
+		call := g.buildCall(c, p, candidate, finishReasonFor(resp, cause), usage,
+			respLosses(resp, p), failovers, started, observedRevision(resp))
+
 		var recordingErr error
 		if g.recorder != nil {
-			recordingErr = g.recorder.Record(context.WithoutCancel(ctx), call)
+			// WithoutCancel deliberately: the work is over and the usage was already incurred, so a
+			// cancelled context must not also destroy the evidence that it happened (S6).
+			recordingErr = g.record(context.WithoutCancel(ctx), c, call, cause)
 		}
 
 		if cause != nil {
@@ -298,7 +301,7 @@ func (g *Gateway) pump(ctx context.Context, c Call, p prepared, candidate infere
 	}
 }
 
-func observedRevision(resp *inference.Response, candidate inference.Candidate) string {
+func observedRevision(resp *inference.Response) string {
 	if resp != nil && resp.ModelRevision != "" {
 		return resp.ModelRevision
 	}

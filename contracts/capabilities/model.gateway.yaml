@@ -60,6 +60,11 @@ tests:
   - pkg/gateway:TestStreamAppliesBackpressureToTheProvider
   - pkg/gateway:TestStreamAbandonsAStalledConsumer
   - pkg/gateway:TestStreamTreatsATruncatedProviderStreamAsFailure
-  # Outstanding for MOD-A01j/k: canonical event emission, provider egress allowlist, and the
-  # OEV-1 revision-drift event. Tracked in tasks.md.
+  - pkg/gateway:TestTerminalEventsAreRecordedWithTheMetadata
+  - pkg/gateway:TestFailoverEmitsAnAuditEventPerAbandonedRoute
+  - pkg/gateway:TestRevisionDriftEmitsAnEvaluationEvent
+  - pkg/gateway:TestEmittedEventsCarryNoBody
+  - pkg/gateway:TestStreamEmitsTheSameTerminalEventsAsComplete
+  # Outstanding for MOD-A01k: provider egress allowlist and the no-filesystem-mounts deployment
+  # posture. Tracked in tasks.md.
   - conformance/model-gateway

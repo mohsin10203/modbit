@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/modbit/modbit/pkg/event"
 	"github.com/modbit/modbit/pkg/gateway"
 	"github.com/modbit/modbit/pkg/id"
 	"github.com/modbit/modbit/pkg/inference"
@@ -47,13 +49,24 @@ func (b *broker) Lease(_ context.Context, providerID string) (inference.Credenti
 }
 
 type recorder struct {
-	calls []gateway.ModelCall
-	err   error
+	mu     sync.Mutex
+	calls  []gateway.ModelCall
+	events []event.Envelope
+	err    error
 }
 
-func (r *recorder) Record(_ context.Context, call gateway.ModelCall) error {
+func (r *recorder) Record(_ context.Context, call gateway.ModelCall, events []event.Envelope) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.calls = append(r.calls, call)
+	r.events = append(r.events, events...)
 	return r.err
+}
+
+func (r *recorder) recorded() ([]gateway.ModelCall, []event.Envelope) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]gateway.ModelCall(nil), r.calls...), append([]event.Envelope(nil), r.events...)
 }
 
 type spendReporter struct {
@@ -169,6 +182,9 @@ func newHarness(t *testing.T, opts gateway.Options, models ...inference.Capabili
 	if opts.Recorder == nil {
 		opts.Recorder = rec
 	}
+	if opts.Sequencer == nil {
+		opts.Sequencer = event.NewMemorySequencer()
+	}
 	if opts.Clock == nil {
 		opts.Clock = fixedClock{}
 	}
@@ -179,11 +195,23 @@ func newHarness(t *testing.T, opts gateway.Options, models ...inference.Capabili
 	return harness{gw: gw, adapters: fakes, broker: b, recorder: rec}
 }
 
+func (h harness) recordedCalls() []gateway.ModelCall {
+	calls, _ := h.recorder.recorded()
+	return calls
+}
+
+func (h harness) recordedEvents() []event.Envelope {
+	_, events := h.recorder.recorded()
+	return events
+}
+
 func call(t *testing.T, h harness, req inference.Request, snap settings.Snapshot) (gateway.Result, error) {
 	t.Helper()
 	return h.gw.Complete(context.Background(), gateway.Call{
 		Request:          req,
 		OrganizationID:   id.MustNew(id.Organization),
+		SpaceID:          id.MustNew(id.Space),
+		CorrelationID:    id.MustNew(id.Correlation),
 		Settings:         snap,
 		PolicyDecisionID: id.MustNew(id.PolicyDecision),
 		Taint:            taint.UserTrusted,
@@ -221,11 +249,11 @@ func TestSuccessfulCallRecordsImmutableMetadata(t *testing.T) {
 	if res.RecordingErr != nil {
 		t.Fatalf("Record: %v", res.RecordingErr)
 	}
-	if len(h.recorder.calls) != 1 {
-		t.Fatalf("recorded %d calls, want 1", len(h.recorder.calls))
+	if len(h.recordedCalls()) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(h.recordedCalls()))
 	}
 
-	rec := h.recorder.calls[0]
+	rec := h.recordedCalls()[0]
 	if !rec.ID.HasPrefix(id.ModelCall) {
 		t.Errorf("model call id = %q", rec.ID)
 	}
@@ -262,7 +290,7 @@ func TestRecordedMetadataCarriesNoPromptOrCompletionBody(t *testing.T) {
 		t.Fatalf("Complete: %v", err)
 	}
 
-	encoded, err := json.Marshal(h.recorder.calls[0])
+	encoded, err := json.Marshal(h.recordedCalls()[0])
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -330,7 +358,7 @@ func TestDLPRedactionRewritesThePayloadBeforeEgress(t *testing.T) {
 		t.Fatal("a redacted call should still complete")
 	}
 
-	rec := h.recorder.calls[0]
+	rec := h.recordedCalls()[0]
 	if len(rec.DLPFindings) == 0 {
 		t.Fatal("expected a DLP finding for the connection string")
 	}
@@ -737,5 +765,172 @@ func TestCredentialExpiry(t *testing.T) {
 	}
 	if (inference.Credential{}).IsZero() != true {
 		t.Error("the zero credential must report itself as unset")
+	}
+}
+
+// INV-5 and R-EVT-04: events are written with the metadata, not published separately, so a
+// recorded call can never exist without its event nor an event without its call.
+func TestTerminalEventsAreRecordedWithTheMetadata(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, gateway.Options{})
+	if _, err := call(t, h, request("hello"), snapshot(t, nil)); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	calls, events := h.recorder.recorded()
+	if len(calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(calls))
+	}
+	if len(events) != 1 {
+		t.Fatalf("recorded %d events, want exactly the terminal one: %+v", len(events), events)
+	}
+
+	e := events[0]
+	if e.EventType != event.TypeModelCompleted {
+		t.Errorf("event type = %q, want model.completed", e.EventType)
+	}
+	if err := e.Validate(); err != nil {
+		t.Fatalf("emitted envelope is not valid: %v", err)
+	}
+	if e.RunID != calls[0].RunID || e.OrganizationID != calls[0].OrganizationID {
+		t.Error("the event must be bound to the same run and tenant as the metadata")
+	}
+	if e.Sequence == 0 {
+		t.Error("a run-scoped event requires a positive sequence")
+	}
+	if e.PolicyDecisionID != calls[0].PolicyDecisionID {
+		t.Error("the event must carry the authorizing policy decision (INV-7)")
+	}
+	if e.SettingsSnapshotID != calls[0].SettingsSnapshotID {
+		t.Error("the event must bind the run's settings snapshot (INV-6)")
+	}
+}
+
+func TestFailedCallEmitsModelFailed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, gateway.Options{})
+	h.adapters[0].Faults = fake.Faults{
+		FailWith: modberr.New(modberr.CodeInvalidArgument, "malformed request"),
+	}
+	if _, err := call(t, h, request("hello"), snapshot(t, nil)); err == nil {
+		t.Fatal("expected the call to fail")
+	}
+	// A non-retryable adapter refusal returns before any metadata exists, so nothing is recorded:
+	// there is no call to attribute usage to.
+	if calls, events := h.recorder.recorded(); len(calls) != 0 || len(events) != 0 {
+		t.Errorf("a pre-completion refusal recorded %d calls and %d events, want none", len(calls), len(events))
+	}
+}
+
+func TestFailoverEmitsAnAuditEventPerAbandonedRoute(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, gateway.Options{MaxRouteAttempts: 3},
+		testModel("acme", "acme-large"), testModel("other", "other-model"))
+	h.adapters[0].Faults = fake.Faults{
+		FailWith: modberr.New(modberr.CodeProviderUnavailable, "upstream is down"),
+	}
+	if _, err := call(t, h, request("hello"), snapshot(t, nil)); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	events := h.recordedEvents()
+	var failedOver, completed int
+	for _, e := range events {
+		switch e.EventType {
+		case event.TypeModelFailedOver:
+			failedOver++
+			if !e.RequiresAudit() {
+				t.Error("model.failed_over must reach the audit log")
+			}
+		case event.TypeModelCompleted:
+			completed++
+		}
+	}
+	if failedOver != 1 || completed != 1 {
+		t.Fatalf("events = %d failed_over, %d completed; want 1 and 1", failedOver, completed)
+	}
+
+	// Sequences must be strictly increasing so the log reassembles in the order it happened.
+	for i := 1; i < len(events); i++ {
+		if events[i].EventType == event.TypeEvaluationRevisionDetected {
+			continue // organization scoped, unsequenced
+		}
+		if events[i].Sequence <= events[i-1].Sequence {
+			t.Errorf("sequences are not increasing: %d then %d", events[i-1].Sequence, events[i].Sequence)
+		}
+	}
+}
+
+// OEV-1: a provider serving a revision other than the declared one is an organization-wide signal,
+// because the roll affects every run routed to that model, not just the one that noticed.
+func TestRevisionDriftEmitsAnEvaluationEvent(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, gateway.Options{})
+	h.adapters[0].ReportRevision = "2026-08-15"
+
+	if _, err := call(t, h, request("hello"), snapshot(t, nil)); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	var found bool
+	for _, e := range h.recordedEvents() {
+		if e.EventType == event.TypeEvaluationRevisionDetected {
+			found = true
+			if err := e.Validate(); err != nil {
+				t.Errorf("drift envelope is not valid: %v", err)
+			}
+			if !e.RequiresAudit() {
+				t.Error("evaluation.revision.detected must reach the audit log")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("a drifted revision must emit evaluation.revision.detected")
+	}
+
+	// No drift, no event.
+	steady := newHarness(t, gateway.Options{})
+	if _, err := call(t, steady, request("hello"), snapshot(t, nil)); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	for _, e := range steady.recordedEvents() {
+		if e.EventType == event.TypeEvaluationRevisionDetected {
+			t.Error("a matching revision must not emit a drift event")
+		}
+	}
+}
+
+// A recorder with no sequence authority would produce run events that cannot be ordered on replay.
+func TestRecorderWithoutASequencerIsRefusedAtConstruction(t *testing.T) {
+	t.Parallel()
+	model := testModel("acme", "acme-large")
+	registry, err := inference.NewRegistry([]inference.Adapter{fake.New(model)}, []inference.Capabilities{model})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	_, err = gateway.New(gateway.Options{
+		Registry: registry, Inspector: gateway.NewDefaultInspector(),
+		Broker: &broker{}, Recorder: &recorder{},
+	})
+	if err == nil {
+		t.Fatal("a gateway with a recorder but no sequence authority must be refused")
+	}
+}
+
+// Emitted envelopes are evidence and must carry no prompt content (INV-4).
+func TestEmittedEventsCarryNoBody(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, gateway.Options{})
+	const marker = "EVENT-BODY-MARKER-4d1f"
+	if _, err := call(t, h, request("analyse "+marker), snapshot(t, nil)); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	for _, e := range h.recordedEvents() {
+		encoded, err := json.Marshal(e)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if strings.Contains(string(encoded), marker) || strings.Contains(string(encoded), testSecret) {
+			t.Fatalf("event envelope carries a body or credential: %s", encoded)
+		}
 	}
 }

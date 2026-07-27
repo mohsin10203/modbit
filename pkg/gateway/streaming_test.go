@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modbit/modbit/pkg/event"
 	"github.com/modbit/modbit/pkg/gateway"
 	"github.com/modbit/modbit/pkg/id"
 	"github.com/modbit/modbit/pkg/inference"
@@ -23,6 +24,8 @@ func streamCall(req inference.Request, snap settings.Snapshot) gateway.Call {
 	return gateway.Call{
 		Request:          req,
 		OrganizationID:   id.MustNew(id.Organization),
+		SpaceID:          id.MustNew(id.Space),
+		CorrelationID:    id.MustNew(id.Correlation),
 		Settings:         snap,
 		PolicyDecisionID: id.MustNew(id.PolicyDecision),
 		Taint:            taint.UserTrusted,
@@ -182,10 +185,10 @@ func TestStreamRecordsMetadataOnEveryTermination(t *testing.T) {
 			t.Fatalf("Stream: %v", err)
 		}
 		_, terminal := drain(t, events)
-		if len(h.recorder.calls) != 1 {
-			t.Fatalf("recorded %d calls, want exactly 1", len(h.recorder.calls))
+		if len(h.recordedCalls()) != 1 {
+			t.Fatalf("recorded %d calls, want exactly 1", len(h.recordedCalls()))
 		}
-		rec := h.recorder.calls[0]
+		rec := h.recordedCalls()[0]
 		if rec.Usage.Total() == 0 {
 			t.Error("usage was not recorded")
 		}
@@ -218,10 +221,10 @@ func TestStreamRecordsMetadataOnEveryTermination(t *testing.T) {
 		if !modberr.Is(terminal.Err, modberr.CodeCancelled) {
 			t.Errorf("error = %v, want MODBIT_CANCELLED", terminal.Err)
 		}
-		if len(h.recorder.calls) != 1 {
-			t.Fatalf("S6 violated: recorded %d calls on cancellation, want 1", len(h.recorder.calls))
+		if len(h.recordedCalls()) != 1 {
+			t.Fatalf("S6 violated: recorded %d calls on cancellation, want 1", len(h.recordedCalls()))
 		}
-		if got := h.recorder.calls[0].FinishReason; got != inference.FinishCancelled {
+		if got := h.recordedCalls()[0].FinishReason; got != inference.FinishCancelled {
 			t.Errorf("finish reason = %q, want cancelled", got)
 		}
 	})
@@ -239,8 +242,8 @@ func TestStreamRecordsMetadataOnEveryTermination(t *testing.T) {
 		if terminal.Err == nil {
 			t.Fatal("a stream ending without an assembled response must fail")
 		}
-		if len(h.recorder.calls) != 1 {
-			t.Errorf("S6 violated: recorded %d calls on failure, want 1", len(h.recorder.calls))
+		if len(h.recordedCalls()) != 1 {
+			t.Errorf("S6 violated: recorded %d calls on failure, want 1", len(h.recordedCalls()))
 		}
 	})
 }
@@ -325,8 +328,8 @@ func TestStreamAbandonsAStalledConsumer(t *testing.T) {
 			t.Fatal("S9 violated: the pump did not abandon a stalled consumer")
 		}
 	}
-	if len(h.recorder.calls) != 1 {
-		t.Errorf("S6/S9 violated: recorded %d calls for an abandoned stream, want 1", len(h.recorder.calls))
+	if len(h.recordedCalls()) != 1 {
+		t.Errorf("S6/S9 violated: recorded %d calls for an abandoned stream, want 1", len(h.recordedCalls()))
 	}
 }
 
@@ -452,11 +455,55 @@ func TestStreamMetadataCarriesNoBody(t *testing.T) {
 	}
 	drain(t, events)
 
-	encoded, err := marshalCall(h.recorder.calls[0])
+	encoded, err := marshalCall(h.recordedCalls()[0])
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if strings.Contains(encoded, marker) || strings.Contains(encoded, testSecret) {
 		t.Fatalf("streaming metadata contains a body or credential: %s", encoded)
 	}
+}
+
+// A stream's evidence must be structurally identical to a completion's, including its events.
+func TestStreamEmitsTheSameTerminalEventsAsComplete(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success emits model.completed", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, gateway.Options{})
+		events, err := h.gw.Stream(context.Background(), streamCall(request("hello"), snapshot(t, nil)))
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		drain(t, events)
+
+		emitted := h.recordedEvents()
+		if len(emitted) != 1 || emitted[0].EventType != event.TypeModelCompleted {
+			t.Fatalf("emitted = %+v, want exactly model.completed", emitted)
+		}
+		if err := emitted[0].Validate(); err != nil {
+			t.Errorf("envelope is not valid: %v", err)
+		}
+	})
+
+	t.Run("cancellation emits model.failed", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, gateway.Options{})
+		h.adapters[0].Reply = "one two three four five six"
+		h.adapters[0].Latency = 40 * time.Millisecond
+
+		ctx, cancel := context.WithCancel(context.Background())
+		events, err := h.gw.Stream(ctx, streamCall(request("hello"), snapshot(t, nil)))
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		<-events
+		cancel()
+		drain(t, events)
+
+		emitted := h.recordedEvents()
+		if len(emitted) != 1 || emitted[0].EventType != event.TypeModelFailed {
+			t.Fatalf("emitted = %+v, want exactly model.failed", emitted)
+		}
+	})
 }

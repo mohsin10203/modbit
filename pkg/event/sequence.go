@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"strconv"
 	"sync"
 
 	"github.com/modbit/modbit/pkg/id"
@@ -78,8 +79,8 @@ func (s *MemorySequencer) Resume(runID id.ID, lastSequence uint64) error {
 		return modberr.Newf(modberr.CodeSequenceConflict,
 			"cannot resume run at sequence %d below the allocated %d", lastSequence, current).
 			WithDetail("run_id", runID.String()).
-			WithDetail("expected_sequence", formatUint(lastSequence)).
-			WithDetail("actual_sequence", formatUint(current))
+			WithDetail("expected_sequence", strconv.FormatUint(lastSequence, 10)).
+			WithDetail("actual_sequence", strconv.FormatUint(current, 10))
 	}
 	s.latest[runID] = lastSequence
 	return nil
@@ -91,19 +92,4 @@ func (s *MemorySequencer) Forget(runID id.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.latest, runID)
-}
-
-func formatUint(v uint64) string {
-	const digits = "0123456789"
-	if v == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for v > 0 {
-		i--
-		buf[i] = digits[v%10]
-		v /= 10
-	}
-	return string(buf[i:])
 }

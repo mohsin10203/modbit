@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/modbit/modbit/pkg/id"
@@ -71,7 +72,7 @@ func (b ApprovalBinding) Check(op Operation, now time.Time) error {
 		return modberr.New(modberr.CodeApprovalInvalidated,
 			"the approval was granted under a different lease epoch; the work was reassigned").
 			WithDetail("approval_id", b.ID.String()).
-			WithDetail("fence_epoch", formatUint(b.FenceEpoch))
+			WithDetail("fence_epoch", strconv.FormatUint(b.FenceEpoch, 10))
 	}
 	if !b.ExpiresAt.IsZero() && !now.Before(b.ExpiresAt) {
 		// An expired approval is not a denial: the operation is still permissible, it just needs
@@ -105,18 +106,4 @@ func distinctApprovers(approvers []string) int {
 		seen[a] = struct{}{}
 	}
 	return len(seen)
-}
-
-func formatUint(v uint64) string {
-	if v == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for v > 0 {
-		i--
-		buf[i] = byte('0' + v%10)
-		v /= 10
-	}
-	return string(buf[i:])
 }
