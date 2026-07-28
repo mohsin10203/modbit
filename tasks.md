@@ -230,7 +230,7 @@ PRD §6.1. Docket §3.
 
 | ID | Task | Status |
 |---|---|---|
-| IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed |
+| IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed — ADR-0105 covers the fork/rebase half; **should be split**, only that half is architecturally binding |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | ✅ Qualified — every sub-item a–c complete; sync is SET-C01 (Phase 4) |
 | CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**; what remains is six native backends behind ports that already exist and are tested (`c3`–`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
@@ -710,16 +710,16 @@ each invariant was broken in turn and the named test failed.
 
 | # | Bug | Why it mattered | Fix |
 |---|---|---|---|
-| B-11 | A linked worktree's `.git` **file** was indexed as source | `vcsMetadataDirs` was only consulted for directories, but `git worktree add` writes `.git` as a file holding an absolute path to the repository's git directory. That path was being indexed and would have been embedded — a local filesystem path published into retrievable content. Found by probing the walker against a real linked-worktree layout, not by a failing test. | The check now covers files as well as directories, renamed `vcsMetadataNames`. `TestSecurityLinkedWorktreeGitFileIsNotIndexed`. |
+| B-20 | A linked worktree's `.git` **file** was indexed as source | `vcsMetadataDirs` was only consulted for directories, but `git worktree add` writes `.git` as a file holding an absolute path to the repository's git directory. That path was being indexed and would have been embedded — a local filesystem path published into retrievable content. Found by probing the walker against a real linked-worktree layout, not by a failing test. | The check now covers files as well as directories, renamed `vcsMetadataNames`. `TestSecurityLinkedWorktreeGitFileIsNotIndexed`. |
 
 **CTX-A01b bug fixes**
 
 | # | Bug | Why it mattered | Fix |
 |---|---|---|---|
-| B-7 | `.modbitindexingignore` produced `exclude`, identical to `.modbitignore` | The two files exist precisely to be different: one withholds content from the indexes, the other withholds it from Modbit entirely. Collapsing them made a large fixture invisible to a user who knew it was there, and made decision 43's third disposition unreachable from an ignore file. | The disposition is now chosen by source; `TestIndexingIgnoreYieldsReferenceNotExclusion` pins it. |
-| B-8 | `NewClassifier` appended settings exclusions **into the caller's** `RuleSet` | Two classifiers built from one rule set applied every settings glob twice, and the walker had nothing to preserve across a per-directory rule swap. | Settings exclusions are held in their own set. `TestClassifierDoesNotMutateTheRuleSetItIsGiven` covers it. |
-| B-9 | `IgnoreFileNames` was a **map**, so the order the three ignore files applied in was random | Resolution is last-match-wins, so map iteration order decided which file won when two disagreed — a repository could get different indexing decisions on consecutive runs. | Replaced by the ordered `IgnoreFiles` slice; the order is now documented as contract. |
-| B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
+| B-16 | `.modbitindexingignore` produced `exclude`, identical to `.modbitignore` | The two files exist precisely to be different: one withholds content from the indexes, the other withholds it from Modbit entirely. Collapsing them made a large fixture invisible to a user who knew it was there, and made decision 43's third disposition unreachable from an ignore file. | The disposition is now chosen by source; `TestIndexingIgnoreYieldsReferenceNotExclusion` pins it. |
+| B-17 | `NewClassifier` appended settings exclusions **into the caller's** `RuleSet` | Two classifiers built from one rule set applied every settings glob twice, and the walker had nothing to preserve across a per-directory rule swap. | Settings exclusions are held in their own set. `TestClassifierDoesNotMutateTheRuleSetItIsGiven` covers it. |
+| B-18 | `IgnoreFileNames` was a **map**, so the order the three ignore files applied in was random | Resolution is last-match-wins, so map iteration order decided which file won when two disagreed — a repository could get different indexing decisions on consecutive runs. | Replaced by the ordered `IgnoreFiles` slice; the order is now documented as contract. |
+| B-19 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
 | QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | 🚧 In Progress — capability-evidence gate (QA-A01a) and performance gates (QA-A01c) Qualified; event conformance (QA-A01b) covers R-EVT-01, with R-EVT-04/05/06/08 blocked on a durable store |
 
@@ -761,7 +761,7 @@ diagnostics to be sorted and identical.
 | 176 | A malformed file contributes nothing and says so **loudly** | Falling back to defaults silently would leave a user believing their configuration is in force when it is not. For a security setting that is the worst available outcome, so the diagnostic is an error rather than a warning. |
 | 177 | A symlinked settings file is not followed | A repository can commit a link, and following one would read a file the repository chose from somewhere the layout never declared — the same reasoning as CTX-A01b decision 52 for the indexer. |
 | 178 | Layout paths are joined to a resolved root, never taken from a document | No value inside a settings file can redirect the loader at another path. |
-| 179 | Discovery order is a slice, not a map | It decides which file wins when two author the same key at one scope, and a map would make that vary per run — the same defect as B-9 in the index ignore files. |
+| 179 | Discovery order is a slice, not a map | It decides which file wins when two author the same key at one scope, and a map would make that vary per run — the same defect as B-18 in the index ignore files. |
 
 **SET-A01c UI metadata (U1–U6)**
 
@@ -795,6 +795,39 @@ property of its key.
 | 182 | Order defaults to **declaration order in the contract file** | That sequence is already reviewed — the author grouped related keys together — so it beats anything derivable from the key and costs nothing to carry. |
 | 183 | `Sensitive()` surfaces the security consequence | A `critical` setting rendered as an ordinary toggle tells the user nothing about what they are changing. The registry cannot force a surface to render well, but it can refuse to let one claim it did not know. |
 | 184 | The generator **duplicates** the widget and initialism tables, and a test compares them | The non-test generator importing `pkg/settings` would make a clean-tree build circular: producing `definitions_gen.go` would require the package that requires it. A test in the generator's package has no such problem, so that is where the duplication is kept honest. Comparing only the keys in the registry was not enough — an unused initialism can drift for releases before a key needs it, so the guard walks both tables directly. |
+
+**IDE-A01 — the derivation strategy is the binding half (ADR-0105)**
+
+`IDE-A01` bundles six deliverables. Five are ordinary work; the sixth is the least reversible decision
+in the project, because its cost is not paid when it is made. A hard fork looks identical to every
+other option on day one and compounds every month after, and by the time the cost is visible the
+decision is expensive to revisit.
+
+**The pack has already narrowed this more than the task entry suggests.** SDD §17 states *"Code OSS
+rebases are isolated from Modbit product modules"* — a requirement, not a preference, and it rules out
+building the product inside a copied tree, which is what most products in this space actually do. SDD
+§6 says the same thing from the other side: the local IDE runtime is seven components and the
+Workbench is one of them. The other six — Local Agent Host, Settings Cache, Local Context Cache,
+Browser Host, Local Worker — are what `pkg/agent`, `pkg/settings`, `pkg/index` and `pkg/sandbox`
+already are. **The isolation the pack asks for is the architecture it already describes**, and this
+repository is on the correct side of it.
+
+ADR-0105 recommends an overlay with a **bounded** patch series: upstream vendored unmodified, product
+code composed at build time, extensions preferred by default, and core patches numbered against the
+`IDE-n` requirement each serves. The load-bearing part is the last one — the count of upstream files
+touched is gated, because every derivative that became unmaintainable got there by accepting
+individually reasonable patches. A number that has to be argued up is the only defence that survives
+contact with a deadline, and the repository already applies that discipline to itself in `QA-A01c`.
+
+Open VSX is not a trade-off to revisit: the Microsoft marketplace's terms restrict it to Microsoft's
+own products, so pointing a Code OSS derivative at it is a licensing problem rather than a technical
+one. The PRD settled it; this is recorded so it is not "fixed" later.
+
+**ADR-0105 is the only ADR here not backed by measurement**, and it says so. The measurement it needs
+is one classification: which of IDE-1..IDE-15 the extension API can deliver and which need a core
+patch. That number *is* the maintenance cost of the strategy, and the four doubtful cases are known —
+IDE-1 (partial-accept and next-edit inline UI), IDE-9 (in-editor diff zones), IDE-4 (terminal
+selection), IDE-12 (multiple agents in isolated worktrees). A spike answering those decides it.
 
 ### QA-A01 breakdown
 
