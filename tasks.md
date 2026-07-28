@@ -237,7 +237,7 @@ PRD §6.1. Docket §3.
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
-| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | ⬜ Proposed |
+| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | 🚧 In Progress — run state machine Qualified (AGT-A01a); typed tools, steering queue, and completion contract outstanding |
 | EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | ⬜ Proposed |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
@@ -552,6 +552,48 @@ each invariant was broken in turn and the named test failed.
 | B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
 | QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | ⬜ Proposed |
+
+### AGT-A01 breakdown
+
+| ID | Task | Requirements | Status | Evidence |
+|---|---|---|---|---|
+| AGT-A01a | Run state machine — phases, modes, halt reasons, bounded loops, checkpoints, resume | RUN-1..RUN-6, COR-5 | ✅ Qualified | `pkg/agent/run.go`, 14 tests; A1–A9 mutation-verified |
+| AGT-A01b | Typed tool registry — schemas, policy checks, taint propagation into results | §11.2, INV-13 | ⬜ Ready | |
+| AGT-A01c | Steering queue — ordered, durable, safe-boundary application, Interrupt Now | STR-1..STR-7 | ⬜ Ready | |
+| AGT-A01d | Completion contract — not-run / inconclusive / failed / passed | VER-1, VER-6 | ⬜ Ready | |
+
+**AGT-A01a run protocol (A1–A9)**
+
+PRD §11.1 specifies a durable workflow graph rather than an unbounded chat loop, and that distinction
+is the whole design: a chat loop has no phase to checkpoint, no transition to emit, and no bound to
+exhaust, so none of RUN-1 through RUN-6 can be stated about it, let alone enforced.
+
+| # | Invariant |
+|---|---|
+| A1 | Every transition emits exactly one event, written with the state change |
+| A2 | A run halts for exactly one reason from RUN-4's closed set, and a halted run cannot transition |
+| A3 | A run cannot enter a phase its mode's plan does not contain |
+| A4 | Loops are bounded; exhausting the budget halts rather than spinning |
+| A5 | Every phase entered produces a checkpoint |
+| A6 | Resume is refused when the environment or inputs changed |
+| A7 | An illegal transition is refused and emits nothing |
+| A8 | A cancelled or superseded run records the phase it interrupted |
+| A9 | Ask mode can never reach execute |
+
+All nine are mutation-verified.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 131 | A mode is a **phase plan**, not a permission flag | §11.1 says not every workflow requires every phase, and the differences *are* the modes' meaning. Making the plan the authority is what turns "Ask is read-only" from a rule somebody remembers into something structural: `execute` is absent from Ask's plan, so there is no transition to refuse. `TestSecurityAskModeCanNeverExecute` checks both the refusal and the plan's contents, because a runtime check standing in for a structural guarantee is the weaker of the two. |
+| 132 | `Mode` carries all six values from the settings enum, and three are refused **by name** | `agent.default_mode` is the contract and the authority. A type with only the implemented three would make a valid setting unrepresentable; falling back to an implemented mode would run something the user did not choose. `MODBIT_CAPABILITY_UNAVAILABLE` says "not yet" rather than "unknown". |
+| 133 | Exhausting the loop budget **halts** rather than refusing | A run that could not loop and could not stop would sit at a failing phase forever, and RUN-3's bound would be a number nothing enforced. The halt is a real outcome a caller can report. |
+| 134 | Only declared backward edges are loops at all | An arbitrary jump backwards would let a run re-enter `authorize` after executing, which is how an approved plan quietly becomes a different one. Forward skips are refused for the same reason: `authorize` is the one phase whose omission changes what the run is allowed to do. |
+| 135 | The checkpoint is taken on **entry** to a phase, not exit | A run that dies mid-phase then resumes at the start of that phase rather than at the end of the previous one — the difference between redoing a phase and skipping it. |
+| 136 | A checkpoint carries `LoopsUsed`, and resume restores it | Without it, resume is an unbounded-loop primitive: fail, resume, fail, resume, with RUN-3's bound never reached. `TestSecurityResumeCannotResetTheLoopBudget` pins it. |
+| 137 | Resume compares an environment **digest**, not a caller's assurance | RUN-5 and RUN-6 need a value to compare. Resuming into a moved tree would apply a plan built for one revision to another and nothing downstream could tell — the run would look like it had simply continued. Revision, worktree, tool surface, and policy snapshot all participate. |
+| 138 | A failed emit **rolls back** the phase | R-EVT-04 makes the state write and the event one act. A run that advanced while its event was lost is the exact divergence the rule prevents, so the transition is undone rather than reported as done. |
+| 139 | Halt reasons map onto **distinct** canonical events | A consumer filtering the audit log for failures must not also catch deliberate cancellations. Completion, failure, and cancellation keep their own types; the remaining five share `run.halted`, which carries the reason. |
+| 140 | `emit` takes no payload map | The canonical envelope carries payloads by reference (`Attributes.PayloadRef`), not inline. A map accepted and discarded reads as though the detail were recorded, which is worse than not offering it — the first draft did exactly that. What a halt records lives in the `Halt` value and the event type. |
 
 ### MOD-A01 breakdown
 

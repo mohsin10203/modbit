@@ -68,6 +68,8 @@ events:
   - { type: run.completed,              family: run, scope: run, audit: true }
   - { type: run.failed,                 family: run, scope: run, audit: true }
   - { type: run.cancelled,              family: run, scope: run, audit: true }
+  - { type: run.checkpoint.created,     family: run, scope: run }
+  - { type: run.halted,                 family: run, scope: run, audit: true }
   - { type: run.reversion.completed,    family: run, scope: run, audit: true }
   - { type: run.reversion.incomplete,   family: run, scope: run, audit: true }
 

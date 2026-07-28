@@ -82,6 +82,8 @@ const (
 	TypeRunCompleted                 Type = "run.completed"
 	TypeRunFailed                    Type = "run.failed"
 	TypeRunCancelled                 Type = "run.cancelled"
+	TypeRunCheckpointCreated         Type = "run.checkpoint.created"
+	TypeRunHalted                    Type = "run.halted"
 	TypeRunReversionCompleted        Type = "run.reversion.completed"
 	TypeRunReversionIncomplete       Type = "run.reversion.incomplete"
 	TypeRunStepStarted               Type = "run.step.started"
@@ -245,6 +247,20 @@ var specs = map[Type]Spec{
 	},
 	TypeRunCancelled: {
 		Type:    "run.cancelled",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   true,
+	},
+	TypeRunCheckpointCreated: {
+		Type:    "run.checkpoint.created",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   false,
+	},
+	TypeRunHalted: {
+		Type:    "run.halted",
 		Version: 1,
 		Family:  "run",
 		Scope:   ScopeRun,
