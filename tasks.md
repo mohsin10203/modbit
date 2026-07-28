@@ -237,7 +237,7 @@ PRD §6.1. Docket §3.
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
-| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | 🚧 In Progress — run state machine and steering queue Qualified (AGT-A01a/c); typed tools and completion contract outstanding |
+| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | 🚧 In Progress — state machine, tools, and steering Qualified (AGT-A01a/b/c); completion contract outstanding |
 | EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | ⬜ Proposed |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
@@ -558,7 +558,7 @@ each invariant was broken in turn and the named test failed.
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
 | AGT-A01a | Run state machine — phases, modes, halt reasons, bounded loops, checkpoints, resume | RUN-1..RUN-6, COR-5 | ✅ Qualified | `pkg/agent/run.go`, 14 tests; A1–A9 mutation-verified |
-| AGT-A01b | Typed tool registry — schemas, policy checks, taint propagation into results | §11.2, INV-13 | ⬜ Ready | |
+| AGT-A01b | Typed tool registry — versioned schemas, policy-gated invocation, taint propagation into results | TLS-1..TLS-7, INV-13 | ✅ Qualified | `pkg/agent/tool.go` + `schema.go`, 14 tests; T1–T9 mutation-verified |
 | AGT-A01c | Steering queue — ordered, durable, safe-boundary application, Interrupt Now | STR-1..STR-7 | ✅ Qualified | `pkg/agent/steering.go`, 12 tests; Q1–Q8 mutation-verified |
 | AGT-A01d | Completion contract — not-run / inconclusive / failed / passed | VER-1, VER-6 | ⬜ Ready | |
 
@@ -594,6 +594,39 @@ All nine are mutation-verified.
 | 138 | A failed emit **rolls back** the phase | R-EVT-04 makes the state write and the event one act. A run that advanced while its event was lost is the exact divergence the rule prevents, so the transition is undone rather than reported as done. |
 | 139 | Halt reasons map onto **distinct** canonical events | A consumer filtering the audit log for failures must not also catch deliberate cancellations. Completion, failure, and cancellation keep their own types; the remaining five share `run.halted`, which carries the reason. |
 | 140 | `emit` takes no payload map | The canonical envelope carries payloads by reference (`Attributes.PayloadRef`), not inline. A map accepted and discarded reads as though the detail were recorded, which is worse than not offering it — the first draft did exactly that. What a halt records lives in the `Halt` value and the event type. |
+
+**AGT-A01b tool protocol (T1–T9)**
+
+TLS-1 through TLS-7. This is where the policy engine, the taint lattice, and the side-effect ladder
+meet a real caller for the first time — each was built against its own tests, and a tool call is the
+first thing that drives all three together.
+
+| # | Invariant |
+|---|---|
+| T1 | A tool with no declared side-effect class cannot be registered |
+| T2 | Input is validated before policy is evaluated |
+| T3 | A tool cannot receive a provider credential |
+| T4 | Every call produces a record carrying actor, policy decision, timing, and result hash |
+| T5 | A tool error is a structured value, never prose |
+| T6 | Tool output is untrusted; a result is at least `tool_result` provenance |
+| T7 | Oversized output is truncated with a handle, never silently dropped |
+| T8 | A denied decision means the tool is never invoked |
+| T9 | A schema is versioned, and input is validated against the version being invoked |
+
+All nine are mutation-verified.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 148 | An undeclared side-effect class is refused at **registration**, not at call time | A tool nobody classified is one nobody decided the risk of. Discovering that mid-run means discovering it after the plan was approved, when the cheapest remaining option is to halt. |
+| 149 | Validation runs **before** policy evaluation | TLS-2 states the order, and the reason is that a decision is an audited artifact (INV-7): minting one for a call that was never going to run fills the record with authorizations nothing acted on. The test asserts both that the tool was not reached *and* that no decision was minted. |
+| 150 | `additionalProperties: false` is enforced, and undeclared properties are refused | The input comes from a model. A tool that quietly ignores an extra field lets a prompt injection carry an argument the schema author never anticipated — the refusal is a prompt-injection control, not a tidiness one. |
+| 151 | The validator **refuses what it cannot check** | Full JSON Schema is a specification, not a function, so `BasicValidator` covers the subset tool schemas use and `Supports` reports anything else. A constraint the author wrote and nothing enforces is worse than no constraint, because it reads as one. Adopting a real validator is a dependency decision under R-GO-09 and stays behind the `SchemaValidator` port. |
+| 152 | `Tool.Invoke` takes an input document and nothing else | TLS-7. There is no parameter, field, or context value through which a provider credential could reach a tool. The credential boundary is an explicit argument on adapter methods (MOD-A01 decision 10) precisely so every place one travels is visible, and a tool is not one of those places. |
+| 153 | Recorded provenance is **raised**, never lowered | INV-13. A tool declaring its own output `user_trusted` would launder whatever it read — a file, an HTTP response, a subprocess's stdout — into the class the agent acts on without question. A *higher* class is preserved, so a tool that knows its output is a web fetch can say so. |
+| 154 | The result hash covers the **whole** output, not the truncated record | TLS-5 truncates for the context budget and the event log; a hash over the truncated part would make the record prove only what happened to fit. A failed artifact store fails the call rather than returning a quietly incomplete result. |
+| 155 | The operation hash covers the tool's **versioned identity and its input** | SFX-3/SFX-4 bind an approval to an exact operation. Hashing the name alone would let an approved "run tests" become an approved "run anything" the moment the arguments changed. |
+| 156 | Re-registering a name is a conflict, not a replacement | Silent replacement would let a later registration change what an already-approved plan authorized, under the same name. Two schema versions of one tool are therefore separate registrations, not an in-place upgrade. |
+| 157 | `MaxOutputBytes` is a constant, not a setting | It protects the run's own context budget and the event log, neither of which is an operator preference — and a configurable limit is one somebody raises to make a symptom go away. |
 
 **AGT-A01c steering protocol (Q1–Q8)**
 
