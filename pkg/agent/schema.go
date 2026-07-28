@@ -190,6 +190,3 @@ func join(path, name string) string {
 	}
 	return path + "." + name
 }
-
-// itoa renders a schema version for Definition.Qualified.
-func itoa(n int) string { return strconv.Itoa(n) }

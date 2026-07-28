@@ -288,11 +288,12 @@ the contract against it, and let the engine decision be its own ADR. That gave `
 | CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
-| CTX-A01d2 | Native lexical engine behind the port (Tantivy local / OpenSearch server) | CTX-5 | ⛔ Blocked | ADR-0102 (**Proposed**) measures the gap and recommends SQLite FTS5 *contingent on SQLite being adopted for local metadata*. Coupled to a decision nothing has taken yet — see below |
+| CTX-A01d3 | Early termination (MaxScore/WAND) in the in-process index | CTX-5, RET-1 | ⬜ Ready | **No dependency, no ADR, no owner decision.** 75.5 ms → ~12.5 µs on the query a user actually types, making the in-process index faster than any engine measured. Must land before CTX-A01d2 — see below |
+| CTX-A01d2 | Native lexical engine behind the port (SQLite FTS5 local / OpenSearch server) | CTX-5 | ⛔ Blocked | Blocked on ADR-0103 acceptance, not on the store question — PRD §40.2 already locks SQLite. ADR-0102 (**Proposed, revised**) recommends FTS5 for memory and persistence, *not* for latency; CTX-A01d3 first. Adapter cannot live in `pkg/index` (boundary test forbids `database/sql`) |
 | CTX-A01e | Symbol extraction and dependency graph — `SymbolExtractor`/`SymbolIndex` ports, stdlib Go extractor, import edges | CTX-5, CTX-7, CTX-12 | ✅ Qualified | `pkg/index/symbol.go`, 11 tests; G1–G8 mutation-verified |
 | CTX-A01e2 | tree-sitter extractor for the remaining languages | CTX-5 | ⬜ Ready | cgo dependency; needs an ADR. Implements `SymbolExtractor` without changing anything above it |
 | CTX-A01f | Semantic index — `VectorIndex` port, `Embedder` port, model-scoped partitions, in-process cosine | CTX-5, RET-1 | ✅ Qualified | `pkg/index/vector.go`, 14 tests; V1–V8 and V10 mutation-verified, V9 documented as structural |
-| CTX-A01f2 | pgvector/HNSW behind the port | CTX-5 | ⬜ Ready | Datastore choice needs an ADR under R-ARCH-01 |
+| CTX-A01f2 | pgvector/HNSW behind the port | CTX-5 | ⛔ Blocked | Same gate as CTX-A01d2: ADR-0103 acceptance. PRD §40.2 leaves the local vector adapter open ("selected from supported implementations"), so this needs its own ADR on top |
 | CTX-A01g | Branch, revision, and worktree awareness | CTX-3 | ✅ Qualified | `pkg/index/worktree.go`, 26 assertions incl. ref-name and partition-key security suites |
 | CTX-A01h | Immutable index snapshots recording source revision, indexer version, policy version | CTX-8, CTX-9 | ✅ Qualified | `pkg/index/snapshot.go`, 20 tests incl. tamper detection and partition scoping |
 | CTX-A01i | Citations and context-item provenance | RET-6, RET-8, RET-9 | ✅ Qualified | `pkg/index/citation.go`, 15 tests incl. 6 security suites; C1–C10 mutation-verified |
@@ -396,38 +397,90 @@ were mutation-verified.
 | 97 | A source that stops flushes what it already has | A watcher shutting down is not a reason to discard edits the user already made. |
 | 98 | `PollSource` declares itself on every batch | It cannot observe individual changes, so every batch is a `Rescan` carrying `poll_interval`. Presenting a rebuild as an update would hide that this deployment has no native watcher — and it is the floor, not the target: a full walk does not meet CTX-2 on a large tree. |
 
-**CTX-A01d2 — measured before proposing an engine (ADR-0102)**
+**CTX-A01d2 — measured before proposing an engine (ADR-0102, ADR-0103)**
 
 The question was framed as "which engine", but the first thing to establish was whether the shipped
-in-process index actually needs replacing, and at what size — because that decides how much
-dependency is worth taking. `BenchmarkLexicalIndexScale` answers it with a code-shaped synthetic
-corpus:
+in-process index actually needs replacing, and where — because that decides how much dependency is
+worth taking. `BenchmarkLexicalIndexScale` measures scale on a code-shaped synthetic corpus. The
+counter is **files**; `Chunk`'s 60-line window makes it two documents per file.
 
-| documents | search latency | heap | bytes/document |
-|---|---|---|---|
-| 1,000 | 1.5 ms | 9.2 MB | 9,663 |
-| 10,000 | 19.4 ms | 90 MB | 9,454 |
-| 50,000 | 228 ms | 417 MB | 8,746 |
+| files | chunks | search (common terms) | heap | bytes/file |
+|---|---|---|---|---|
+| 1,000 | 2,000 | 1.5 ms | 9.2 MB | 9,663 |
+| 10,000 | 20,000 | 19.4 ms | 90 MB | 9,454 |
+| 50,000 | 100,000 | 228 ms | 417 MB | 8,746 |
 
-Memory is linear at ~9 KB/document with nothing to gain at scale. Latency is **superlinear** —
-ten times the documents costs thirteen times the latency, five times again costs twelve. Extrapolated
-to a 100k-file repository (~500k chunks): **~4.4 GB resident and multi-second queries**, against a
-PRD §9.6 target twenty times larger again. No constant-factor tuning closes a gap of that shape.
+Memory is linear at ~9 KB/file with nothing to gain at scale, and the index is rebuilt from scratch
+on every start. Extrapolated to a 100k-file repository: **~880 MB resident**, against a PRD §9.6
+target far larger again.
 
-The algorithm is not the problem — BM25 is right and the implementation agrees with it. Two
-structural properties are: the index is memory-resident, and query evaluation is exhaustive with no
-skip structure. Both are what an on-disk segmented index solves.
+**One query measured this wrong.** `BenchmarkLexicalQueryShape` varies the query at fixed scale
+(50k files), and the in-process index turns out not to be generally slow at all:
 
-**ADR-0102 is Proposed, not Accepted, and deliberately so.** It recommends SQLite FTS5 *contingent
-on SQLite being adopted for local metadata* (PRD §6.1 specifies it; nothing in the repository has
-committed to it). That is the only option whose dependency cost may already be paid for another
-reason. Bleve is the pure-Go fallback; Tantivy-via-cgo is for when latency becomes binding, since it
-makes cross-compilation a project. **The two questions are coupled** — answering the search question
-first would likely force the store decision — so the ADR stops at a recommendation rather than
-taking it.
+| query | in-process | FTS5 (cgo, pre-tokenized) |
+|---|---|---|
+| four corpus-wide terms | **182 ms** | 362 ms |
+| `handle4217` — one rare token | **12.5 µs** | 115 µs |
+| `Handle4217Item3` — what a user types | **75.5 ms** | 115 µs |
 
-The benchmark stays as the gate: an engine that does not beat these numbers has not earned its
-dependency.
+It beats FTS5 by 9× on a rare token and by 2× when everything is a candidate. It collapses only on
+the third row: `splitIdentifier` cuts on case and underscore, so the identifier carries `item3` —
+which is in every file — and the scoring loop walks every posting of every term. **Cost tracks the
+query's most common term rather than its rarest.** FTS5 is not faster; its cost tracks the best term.
+
+That splits one problem into two, and conflating them produced ADR-0102's first recommendation:
+
+1. **No early termination** — a defect in the query loop, fixable in place with MaxScore/WAND, no
+   dependency. Now tracked as `CTX-A01d3`, and it should land **first**: an engine adopted to fix a
+   latency problem that early termination solves for free is a dependency bought for nothing.
+2. **Memory-resident and rebuilt on start** — the part early termination cannot touch, and the actual
+   case for an on-disk engine.
+
+**Tokenization is a compatibility constraint, not just a performance one.** FTS5's `unicode61` splits
+`snake_case` on the underscore but **not** `camelCase`, so storing raw source satisfies half of L6 and
+silently fails the other half (`porter` and `ascii` likewise; `trigram` has no usable term ranking).
+Pre-tokenizing with the existing `tokenize` before insert fixes it completely, acronym runs included,
+and loses nothing — `Match` carries path/span/score, and snippets come from the file through `Cite`.
+
+**ADR-0102 was revised the day it was written**, before acceptance, on two counts: it cited PRD §6.1
+for the local retrieval stack (that is §40.2; §6.1 is the Release A IDE section), and it recommended
+an engine for a latency problem that is not an engine problem. See its revision history.
+
+The benchmarks stay as the gate, and `BenchmarkLexicalQueryShape` must stay a **shape** benchmark —
+a single query measured this decision wrong once already.
+
+**ADR-0103 — the store was never the open question**
+
+ADR-0102 treated "is SQLite adopted for local metadata?" as undecided. It is not: **PRD §40.2** fixes
+it, under a preamble declaring those defaults *locked unless an ADR proves a compatibility-preserving
+correction is required*. Two other passages read as permissive (§24.1 "Embedded or local
+PostgreSQL-compatible store"; Appendix A "SQLite **or** embedded PostgreSQL-compatible option"), but
+Appendix A disclaims itself as non-mandatory and §24.1 is a packaging inventory. §40.2 governs.
+
+What *is* open is the driver, which the pack does not name. Both were measured:
+
+| | `modernc.org/sqlite` (pure Go) | `mattn/go-sqlite3` (cgo) |
+|---|---|---|
+| Non-stdlib packages compiled in | **37** (25 are `modernc.org/libc`) | **1** |
+| Pulls `net` / `os/exec` | **yes / yes** | no / no |
+| Cross-compilation | works everywhere | C toolchain per target |
+| Query, four common terms @50k | 1,318 ms | 326–362 ms |
+
+Both results cut against the intuitive reading. The pure-Go driver is 3–4× slower — it is SQLite's C
+transpiled over an emulated libc, and the emulation is not free. And it is the option that **expands**
+the trusted surface: `modernc.org/libc` emulates sockets and process control, so it drags in `net` and
+`os/exec` whether or not SQLite calls them, while the cgo driver adds one package and neither import.
+`pkg/index/boundary_test.go` already fails the build on both, and **LCL-4** requires Local Private and
+Offline to pass automated zero-egress qualification.
+
+ADR-0103 therefore recommends the cgo driver with pure-Go retained as a build-tagged fallback — the
+cost is build infrastructure, which `EXE-A01c` needs anyway, rather than runtime and audit surface in
+the exact dimension LCL-4 measures. **Its weakest claim is the one it asserts rather than measures:**
+no cross-compilation was attempted, and that is the first thing to verify before acceptance.
+
+Consequence worth noting: the SQLite-backed `LexicalIndex` **cannot live in `pkg/index`**, whose own
+boundary test forbids `database/sql`. The port stays; the adapter goes in a sibling package. The
+boundary named the constraint before any code was written against it.
 
 **CTX-A01d lexical protocol (L1–L8)**
 

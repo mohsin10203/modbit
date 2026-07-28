@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/modbit/modbit/pkg/id"
@@ -54,7 +55,7 @@ type Definition struct {
 }
 
 // Qualified renders the versioned identity a call is bound to.
-func (d Definition) Qualified() string { return d.Name + "@v" + itoa(d.Version) }
+func (d Definition) Qualified() string { return d.Name + "@v" + strconv.Itoa(d.Version) }
 
 // Tool is a capability the agent may invoke.
 //

@@ -64,3 +64,52 @@ func BenchmarkLexicalIndexScale(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkLexicalQueryShape separates the two costs a lexical index has, because they scale
+// differently and an engine comparison that measures only one of them reaches the wrong answer.
+//
+// "common" is four terms in nearly every chunk: the whole corpus is a candidate, so no index
+// structure can avoid scoring it. "selective" is a rare identifier, which is what a developer
+// actually types and what a skip structure exists to make cheap. An engine earns its dependency on
+// the second number; the first is close to a floor for everyone.
+//
+// Both queries run against one corpus so the shapes are compared at identical scale.
+func BenchmarkLexicalQueryShape(b *testing.B) {
+	const docs = 50000
+	rev := index.Revision{Worktree: "/repo", Branch: "main"}
+
+	idx := index.NewMemoryIndex()
+	for i := range docs {
+		body := synthDoc(i)
+		entry := indexedEntry(fmt.Sprintf("pkg/svc%d/file%d.go", i%400, i), int64(len(body)))
+		chunks, err := index.Chunk(entry, []byte(body))
+		if err != nil {
+			b.Fatalf("Chunk: %v", err)
+		}
+		if err := idx.Upsert(rev, chunks...); err != nil {
+			b.Fatalf("Upsert: %v", err)
+		}
+	}
+
+	// splitIdentifier cuts on case and underscore, not on digit boundaries, so Handle4217Item3
+	// indexes as handle4217item3 + handle4217 + item3. That matters for choosing these queries:
+	// "handle4217" occurs in one file and is genuinely rare, while "item3" is in every file, and
+	// the full identifier degrades to the corpus-wide case because it carries item3 with it.
+	//
+	// The last two are the decision-relevant pair. A user types the full identifier, and this index
+	// answers it at the cost of its most common part rather than its rarest — which is what having
+	// no early termination means in practice.
+	for _, q := range []struct{ name, query string }{
+		{"common", "Handler validate error context"},
+		{"selective_token", "handle4217"},
+		{"selective_identifier", "Handle4217Item3"},
+	} {
+		b.Run(q.name, func(b *testing.B) {
+			for b.Loop() {
+				if _, err := idx.Search(rev, q.query, 20); err != nil {
+					b.Fatalf("Search: %v", err)
+				}
+			}
+		})
+	}
+}
