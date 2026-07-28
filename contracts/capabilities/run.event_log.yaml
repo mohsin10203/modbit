@@ -1,0 +1,57 @@
+# Capability: the canonical run event envelope and its per-run sequence.
+#
+# api-and-events-v5.1.md §4–§5. This is the record every other capability's claims rest on: an
+# approval, a policy decision, and a completion are all assertions that are only as good as the log
+# they were written to. That makes two properties load-bearing rather than merely desirable — the
+# envelope is complete (R-EVT-02) and the per-run sequence is strictly monotonic with no gaps and no
+# duplicates (R-EVT-01), because a duplicate position in an append-only log cannot be repaired and a
+# gap makes the materialized state unrebuildable (R-EVT-07).
+#
+# Sequence allocation is a port. The implementation that matters allocates inside the same
+# transaction as the state write and the outbox insert; the in-process one serves local and offline
+# runs. Both are held to the same conformance suite, because the one whose failure would corrupt an
+# audit log is the one that does not exist yet.
+
+id: run.event_log
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§26-api-and-events
+  - PRD-v5.1-§33.1-entity-model
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events:
+  - run.created
+  - run.phase.changed
+
+tests:
+  # Envelope completeness and validation (R-EVT-02).
+  - pkg/event:TestNewProducesACompleteEnvelope
+  - pkg/event:TestUnknownEventTypeIsRejected
+  - pkg/event:TestTenantScopedEventRequiresAnOrganization
+  - pkg/event:TestScopeDrivenRequiredIdentifiers
+  - pkg/event:TestActorIsValidated
+  - pkg/event:TestOptionalIdentifiersArePrefixChecked
+  - pkg/event:TestJSONRoundTripPreservesTheEnvelope
+  - pkg/event:TestAuditFlagMatchesTheCatalog
+  - pkg/event:TestCatalogIsPopulated
+  - pkg/event:TestValidationFieldOrderIsDeterministic
+  # Payloads by reference (R-EVT-03).
+  - pkg/event:TestPayloadReferenceAndHashMustAgree
+  # Per-run sequence (R-EVT-01), against the in-process implementation.
+  - pkg/event:TestSequencerIsMonotonicPerRun
+  - pkg/event:TestSequencerIsSafeUnderConcurrentAllocation
+  - pkg/event:TestSequencerResumeRefusesToGoBackwards
+  - pkg/event:TestSequencerHonoursContextCancellation
+  # The shared suite every Sequencer must pass (QA-A01b), and the check that it can actually fail.
+  - pkg/event:TestMemorySequencerIsConformant
+  - pkg/event:TestSecuritySequencerConformanceDetectsADuplicateAllocation

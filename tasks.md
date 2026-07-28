@@ -641,7 +641,7 @@ each invariant was broken in turn and the named test failed.
 | B-9 | `IgnoreFileNames` was a **map**, so the order the three ignore files applied in was random | Resolution is last-match-wins, so map iteration order decided which file won when two disagreed — a repository could get different indexing decisions on consecutive runs. | Replaced by the ordered `IgnoreFiles` slice; the order is now documented as contract. |
 | B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
-| QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | 🚧 In Progress — capability-evidence gate (QA-A01a) and performance gates (QA-A01c) Qualified; event conformance outstanding |
+| QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | 🚧 In Progress — capability-evidence gate (QA-A01a) and performance gates (QA-A01c) Qualified; event conformance (QA-A01b) covers R-EVT-01, with R-EVT-04/05/06/08 blocked on a durable store |
 
 ### SET-A01 breakdown
 
@@ -721,8 +721,40 @@ property of its key.
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
 | QA-A01a | Capability-evidence gate — every cited test must exist; orphaned security tests reported | R-TST-01, R-TST-05 | ✅ Qualified | `tools/modbitgen/evidence.go`; 193 cited tests verified, 0 orphans |
-| QA-A01b | Client/API event conformance | R-EVT-01..08 | ⬜ Ready | |
+| QA-A01b | Client/API event conformance | R-EVT-01..08 | 🚧 In Progress | `pkg/event/conformance` — the shared `Sequencer` suite (E1–E9) covering R-EVT-01 and the gap-freedom R-EVT-07 rests on, plus capability `run.event_log` registering 17 previously uncited event tests. R-EVT-04/05/06/08 need a durable store — see below |
 | QA-A01c | Performance gates and benchmark smoke | PRD §7, §8A.3 | ✅ Qualified | `pkg/index/perf_test.go` + `make perf-gate`. LCX-2/3/4 measured as p95 per PRD §8A.3, per repository class, each budget marked enforced or known gap. Found and fixed an O(vocabulary)-per-edit defect in `retract` — see below |
+
+**QA-A01b — the sequencer that matters is the one that does not exist yet**
+
+`MemorySequencer` had four tests. It is also not the implementation whose failure would corrupt an
+audit log: the authoritative one allocates inside the same transaction as the state write and the
+outbox insert. Assertions written against the in-process implementation alone would mean the
+implementation that actually needs them is the one that never ran them.
+
+So R-EVT-01 now lives in `pkg/event/conformance` as a suite (E1–E9), the same shape as the inference
+adapter and sandbox backend suites, and `MemorySequencer` is its first subject rather than its owner.
+E9 (resume is not retrograde) is probed as an optional capability and reported **Skipped** — not
+passed — when a sequencer cannot resume, because a capability that was never exercised has not been
+shown to work.
+
+**The suite is checked against a deliberately broken sequencer**, because a conformance suite that
+cannot fail certifies whatever it is given. The fixture does a read-modify-write without holding the
+lock across both halves — a *lost update*, not a data race, deliberately: a real race would be caught
+by `-race` before the suite reported anything, and the test would then be measuring the race detector.
+It is also the bug a store-backed sequencer actually ships with (SELECT, add one, UPDATE, no
+transaction). E6 catches it, stable over 50 race-enabled runs. Five mutants of `MemorySequencer`
+were caught: unpersisted allocation, retrograde resume accepted, cancellation ignored, non-run
+identifier accepted, and a `Current` that advances.
+
+Registering capability `run.event_log` also brought **17 event tests into the registry that were
+cited by nothing** — the package predates QA-A01a's gate, and the gate only reports orphaned
+`TestSecurity*` tests, so ordinary uncited tests had stayed invisible.
+
+**What is left needs a durable store, not more test design.** R-EVT-04 (transactional outbox),
+R-EVT-05 (idempotency keys), R-EVT-06 (single active transition lease), and R-EVT-08 (artifacts
+durable before a step completes) are all properties of persistence. They are blocked behind ADR-0103
+with `CTX-A01d2` and `CTX-A01f2`, and writing conformance cases for them now would be writing them
+against an imagined API.
 
 **QA-A01c — the gate found an O(vocabulary) defect on its first run**
 
