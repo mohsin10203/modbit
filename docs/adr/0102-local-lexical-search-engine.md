@@ -43,29 +43,31 @@ maps, and a map of maps has no compression to gain. Extrapolated to a 100,000-fi
 **~880 MB**; PRD §9.6 (MRS) targets a 10M-file benchmark, which is far beyond it. The index is also
 rebuilt from scratch on every start.
 
-### Query shape — the measurement that changed the recommendation
+### Query shape — the measurement that changed the recommendation twice
 
-Scale alone is measured with one query. That turned out to hide the real behaviour, so the query
-itself became a variable. At 50,000 files / 100,000 chunks:
+Scale alone is measured with one query. That hid the real behaviour, so the query became a variable.
+At 50,000 files / 100,000 chunks, after `CTX-A01d3` added early termination and top-k selection:
 
 | query | in-process | FTS5 (cgo, pre-tokenized) |
 |---|---|---|
-| `Handler validate error context` — four corpus-wide terms | **182 ms** | 362 ms |
-| `handle4217` — one rare token | **12.5 µs** | 115 µs |
-| `Handle4217Item3` — the full identifier a user types | **75.5 ms** | 115 µs |
+| `Handler validate error context` — four corpus-wide terms | **119 ms** | 323 ms |
+| `handle4217` — one rare token, 2 hits | **13.9 µs** | 83 µs |
+| `Handle4217Item3` — the full identifier a user types | **40.9 ms** | 110 ms |
 
-The in-process index is not generally slow. On a rare token it is **9× faster than FTS5**, because it
-is RAM and FTS5 pays for disk and a SQL round trip. On four corpus-wide terms it is **2× faster**,
-because when everything is a candidate there is nothing for an index structure to skip.
+**The in-process index is faster on every shape** — 2.7×, 6×, and 2.7×. It is RAM; FTS5 pays for disk
+and a SQL round trip on every one of them.
 
-**It collapses on the third row, and that row is the realistic one.** `splitIdentifier` cuts on case
-and underscore, so `Handle4217Item3` indexes and queries as `handle4217item3` + `handle4217` +
-`item3`. Two of those are rare. `item3` is in every file. The scoring loop walks every posting of
-every query term, so the query costs what its **worst** term costs — 75.5 ms — despite containing a
-term that would answer it in 12.5 µs.
+The third row is the interesting one. `splitIdentifier` cuts on case and underscore, so
+`Handle4217Item3` becomes `handle4217item3` + `handle4217` + `item3`. The first two are rare; `item3`
+is in every file. Before `CTX-A01d3` this cost 75.5 ms — the price of the *worst* term. Early
+termination halves it, but cannot remove it, and the reason is worth stating precisely:
 
-That is the finding: **cost tracks the query's most common term rather than its rarest.** FTS5 is not
-winning on raw speed; it is winning because its cost tracks the best term.
+> MaxScore can only stop scanning once **k** candidates exist. Two documents contain the rare terms,
+> and the query asks for twenty. The remaining eighteen can only come from `item3`, so its posting
+> list has to be walked. **This is inherent to returning k results**, not a defect — no index
+> structure avoids it, and FTS5 does not either.
+
+That last point is where this ADR's second version went wrong; see *Revision history*.
 
 ### Tokenization is a compatibility constraint, not just a performance one
 
@@ -92,19 +94,19 @@ snippets come from the file through `Cite`, never from the index.
 
 ## What actually needs fixing
 
-The algorithm is not the problem — BM25 is right and the implementation agrees with it. The two
-problems are separate, and **conflating them is what produced this ADR's first recommendation**:
+The algorithm is not the problem — BM25 is right and the implementation agrees with it. **Latency is
+not the problem either**, which took two revisions to establish. One thing remains:
 
-1. **No early termination.** Query cost tracks the most common term. This is a defect in the query
-   loop, not a reason to adopt an engine — see below.
-2. **The index is memory-resident** and rebuilt on every start, bounded by RAM rather than disk.
+**The index is memory-resident and rebuilt on every start.** ~880 MB at 100,000 files, bounded by RAM
+rather than disk, and paid again at every launch. Early termination cannot touch this, and it is the
+entire remaining case for an engine.
 
 ## Options
 
 | Option | Dependency cost | Notes |
 |---|---|---|
-| **MaxScore / WAND in the existing index** | none | Fixes problem 1 only. Standard, exact — same results, less work. Would take the realistic query toward the 12.5 µs row, i.e. **faster than FTS5**. |
-| **SQLite FTS5** | shares ADR-0103's driver | Fixes problem 2, and problem 1 as a side effect. On-disk, transactional, incremental. Needs pre-tokenization for L6. |
+| **MaxScore / WAND in the existing index** | none | **Done — `CTX-A01d3`.** Exact: L9 requires the ranking to equal an exhaustive scan's, mutation-verified. 1.5–1.9× across shapes. |
+| **SQLite FTS5** | shares ADR-0103's driver | Fixes memory and persistence. On-disk, transactional, incremental. Needs pre-tokenization for L6, and **costs ~2.7× latency**. |
 | **Tantivy via cgo** | Rust toolchain in the build; cross-compilation becomes a project | Fastest option. Go bindings are third-party and thin; a crash in Rust is a crash in the process. |
 | **Tantivy as a sidecar** | a process to supervise, an IPC contract to version | Keeps Rust out of the build and the crash out of the process. Costs a deployment component `EXE-A01` deliberately avoided. |
 | **Bleve (pure Go)** | ~20 modules | No cgo, cross-compiles. Slower than Tantivy, less actively developed. |
@@ -112,49 +114,72 @@ problems are separate, and **conflating them is what produced this ADR's first r
 
 ## Recommendation
 
-**Two decisions, not one — and they were previously collapsed into one.**
+**Adopt FTS5 for memory and persistence, knowingly paying latency for it — or do not adopt it yet.**
 
-1. **Implement early termination in the in-process index now.** It needs no dependency, no ADR, and
-   no owner decision. It is the difference between 75.5 ms and roughly 12.5 µs on the query a user
-   actually types, and it makes the in-process index *faster than any engine here* on selective
-   queries. It should happen whether or not an engine is ever adopted, and it should happen first —
-   an engine adopted to fix a latency problem that early termination solves for free would be a
-   dependency bought for nothing. Tracked as `CTX-A01d3`.
+`CTX-A01d3` is done, and it removed latency from the argument entirely. The in-process index is now
+faster than FTS5 on every measured shape, so an engine is no longer something to reach for; it is a
+trade with a stated price:
 
-2. **Then SQLite FTS5 for the persistence problem**, contingent on ADR-0103 adopting SQLite. Memory
-   is the constraint early termination cannot touch: ~880 MB at 100,000 files, rebuilt from scratch on
-   every start. FTS5 is on-disk, transactional, and incremental, and if the driver is already present
-   for local metadata then the marginal dependency is zero.
+| | in-process | SQLite FTS5 |
+|---|---|---|
+| Resident memory, 100k files | ~880 MB | ~0 |
+| Survives a restart | no — full rebuild | yes |
+| Incremental update | full re-index of a path | transactional |
+| Query latency | **1×** | ~2.7× slower |
+| Dependencies | none | ADR-0103's driver |
 
-If ADR-0103 does not adopt SQLite, **Bleve** is the fallback. Tantivy-via-cgo is for when measured
-latency is the binding constraint — and after decision 1, it will not be.
+**The recommendation is FTS5, and the reason is memory, not speed.** ~880 MB of resident heap for a
+100,000-file repository is not acceptable in a desktop IDE that also hosts an editor, extensions, and
+a language server — and PRD §9.6 targets far larger. Paying 2.7× on a 40 ms query to get that back,
+and to stop rebuilding the whole index at every launch, is the right trade. But it is a trade, and
+the previous two versions of this ADR both presented it as a straight win.
 
-**What should not happen** is adopting an engine before early termination is measured. The first
-version of this ADR recommended exactly that, on a single-query measurement that made the engine look
-necessary for latency. It is not.
+**Contingent on ADR-0103**, which is where the driver — and the cgo question — actually lives. If
+ADR-0103 does not adopt SQLite, **Bleve** is the fallback. Tantivy is now hard to justify at all: its
+advantage was speed, and speed is no longer the binding constraint.
+
+**A defensible alternative is to do nothing more.** For repositories below roughly 20,000 files the
+in-process index costs under 200 MB and answers in tens of milliseconds, which is fine. If Release A
+ships to individual developers on ordinary repositories, deferring the engine — and its first cgo
+dependency — until scale is a real complaint is a reasonable call. That decision belongs to the owner;
+this ADR's job was to make sure it is made on measurements rather than on the assumption that the
+first implementation must be too slow.
 
 ## Consequences
 
-- `LexicalIndex` does not change. `CTX-A01d` put the contract in front of the engine, and L1–L8 are
+- `LexicalIndex` does not change. `CTX-A01d` put the contract in front of the engine, and L1–L9 are
   the acceptance tests any adapter must pass — including the FTS5 adapter, which needs
   pre-tokenization specifically to pass L6.
-- The in-process implementation stays. It is the RET-10 reference an engine is measured against, it
-  is what a small repository and every test uses, and after `CTX-A01d3` it is the faster option on
-  selective queries.
-- `BenchmarkLexicalQueryShape` is the gate, and it must stay a **shape** benchmark. A single query
-  measured this decision wrong once already.
+- The in-process implementation stays regardless. It is the RET-10 reference an engine is measured
+  against, it is what a small repository and every test uses, and it is the faster option.
+- `BenchmarkLexicalQueryShape` is the gate, and it must stay a **shape** benchmark, with both engines
+  answering the **same** query. Getting that wrong is what produced the second revision below.
 
 ## Revision history
 
-Revised the day it was written, before acceptance. The original recommended SQLite FTS5 on the
-strength of a scale measurement taken with one query, and cited "PRD §6.1" for the local retrieval
-stack. Two corrections:
+Twice-revised the day it was written, before acceptance. Recording both, because the errors are
+instructive and the numbers in the original are still quoted elsewhere.
+
+**First revision — citation and diagnosis.**
 
 - **The citation was wrong.** The local retrieval stack is **PRD §40.2** ("Resolved implementation
-  defaults"); §6.1 is "Release A — Cursor-compatible IDE foundation". The distinction matters: §40 is
-  *locked*, so SQLite for local metadata was never the open question this ADR treated it as. See
-  ADR-0103.
-- **The recommendation was wrong.** Measuring a second query shape showed the latency gap is caused by
-  a missing early-termination loop, not by the index being in-process — and that the in-process index
-  already beats FTS5 by 9× where early termination applies. The engine is still warranted, but for
-  memory and persistence, not for speed.
+  defaults"); §6.1 is "Release A — Cursor-compatible IDE foundation". §40 is *locked*, so SQLite for
+  local metadata was never the open question this ADR treated it as. See ADR-0103.
+- **The diagnosis was wrong.** Scale had been measured with a single query. A second query shape
+  showed the latency gap came from a missing early-termination loop, not from the index being
+  in-process.
+
+**Second revision — the comparison was not comparing the same query.** The first revision reported
+FTS5 answering the realistic identifier query in 115 µs against the in-process index's 75.5 ms, and
+projected that early termination would close it to ~12.5 µs. Both figures were wrong:
+
+- **FTS5 was answering a different question.** It stored raw text, where `Handle4217Item3` is a single
+  token matching 2 documents. The in-process index tokenizes it into three terms, one of which is
+  corpus-wide, and must fill k=20. Given the *same* three-term query and the same k, FTS5 takes
+  **110 ms** — not 115 µs. A comparison across two different tokenizations is not a comparison.
+- **The projection was wrong.** MaxScore cannot begin skipping until k candidates exist, and only two
+  documents carry the rare terms. Measured result: 75.5 ms → **40.9 ms**, a 1.85× gain, not 6000×.
+
+Corrected, the in-process index is faster than FTS5 on every shape, and the case for an engine rests
+on memory alone. The lesson worth keeping: **an engine comparison must hold the query fixed**, and a
+projected speedup is not a measured one.

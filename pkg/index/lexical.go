@@ -30,6 +30,7 @@ import (
 //	L6 Identifiers match their parts, so camelCase and snake_case are searchable.
 //	L7 Every match carries the path and span a citation needs.
 //	L8 A query with no usable terms returns nothing, never everything.
+//	L9 Skipping work never changes an answer: the ranking equals an exhaustive scan's.
 //
 // L8 is a property of the scoring loop rather than something guarded: with no terms there is nothing
 // to accumulate a score against, so the result is empty whether or not the early return exists.
@@ -409,50 +410,200 @@ func (m *MemoryIndex) Search(revision Revision, query string, k int) ([]Match, e
 	}
 
 	avgLen := float64(p.totalLen) / float64(p.liveCount)
-	scores := make(map[int]float64)
+
+	stats := make([]searchTerm, 0, len(terms))
 	for _, term := range dedupeTerms(terms) {
 		posting := p.postings[term]
 		if len(posting) == 0 {
 			continue
 		}
-		// Robertson/Sparck-Jones idf with the +1 guard, so a term present in every document scores
-		// zero rather than negative.
-		idf := math.Log(1 + (float64(p.liveCount)-float64(len(posting))+0.5)/(float64(len(posting))+0.5))
-		for ordinal, freq := range posting {
+		idf := idfFor(p.liveCount, len(posting))
+		stats = append(stats, searchTerm{term: term, posting: posting, idf: idf, bound: idf * (bm25K1 + 1)})
+	}
+	if len(stats) == 0 {
+		return nil, nil
+	}
+	// L9. MaxScore: the terms that can move the ranking most are scored first. The tie-break on the
+	// term itself keeps this a total order, so accumulation happens in one fixed sequence and the
+	// float addition that follows is reproducible.
+	slices.SortFunc(stats, func(a, b searchTerm) int {
+		if c := cmp.Compare(b.bound, a.bound); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.term, b.term)
+	})
+	// suffix[i] is the most the terms from i onward can add to a document none of the earlier terms
+	// reached — the ceiling on anything still outside the candidate set.
+	suffix := make([]float64, len(stats)+1)
+	for i := len(stats) - 1; i >= 0; i-- {
+		suffix[i] = suffix[i+1] + stats[i].bound
+	}
+
+	scores := make(map[int]float64, len(stats[0].posting))
+	// sealed records that no document outside `scores` can still reach the top k.
+	sealed, best := false, 0.0
+	for i := range stats {
+		st := &stats[i]
+		// Checking the threshold costs a pass over the accumulators, so it is only worth doing when
+		// it could succeed. The running maximum is a free upper bound on the k-th best score: if
+		// even the best candidate cannot clear what the remaining terms might add, nothing can.
+		if !sealed && len(scores) >= k && best > suffix[i] && kthLargest(scores, k) > suffix[i] {
+			sealed = true
+		}
+		if sealed {
+			// A non-essential term can still reorder the candidates, but it cannot introduce one.
+			// Looking each candidate up costs len(scores) instead of walking a posting list that a
+			// corpus-wide term makes as long as the corpus. This is the whole optimisation: a query
+			// like `Handle4217Item3` carries a rare term and a term in every file, and without this
+			// it pays for the second one.
+			//
+			// Assigning to existing keys while ranging is defined; `sealed` is exactly the promise
+			// that no key is added here.
+			for ordinal := range scores {
+				freq, ok := st.posting[ordinal]
+				if !ok {
+					continue
+				}
+				d := p.docs[ordinal]
+				if !d.live {
+					continue
+				}
+				s := scores[ordinal] + st.idf*bm25Norm(freq, d.length, avgLen)
+				scores[ordinal] = s
+				best = max(best, s)
+			}
+			continue
+		}
+		for ordinal, freq := range st.posting {
 			d := p.docs[ordinal]
 			if !d.live {
 				continue
 			}
-			tf := float64(freq)
-			norm := tf * (bm25K1 + 1) / (tf + bm25K1*(1-bm25B+bm25B*float64(d.length)/avgLen))
-			scores[ordinal] += idf * norm
+			s := scores[ordinal] + st.idf*bm25Norm(freq, d.length, avgLen)
+			scores[ordinal] = s
+			best = max(best, s)
 		}
 	}
 	if len(scores) == 0 {
 		return nil, nil
 	}
 
-	matches := make([]Match, 0, len(scores))
-	for ordinal, score := range scores {
-		d := p.docs[ordinal]
-		matches = append(matches, Match{Path: d.path, Span: d.span, Score: score})
-	}
 	// L5. Map iteration is random, so an unbroken tie would reorder between runs and a recorded
 	// retrieval would not be reproducible evidence (the same reason routing is deterministic —
 	// MOD-A01 decision 6). Path then span start makes the order total.
-	slices.SortFunc(matches, func(a, b Match) int {
-		if c := cmp.Compare(b.Score, a.Score); c != 0 {
+	//
+	// Ordinals are ranked rather than Matches: a corpus-wide term can leave every document in the
+	// candidate set, and building a Match for each only to discard all but k is the allocation this
+	// avoids.
+	ordinals := make([]int, 0, len(scores))
+	for ordinal := range scores {
+		ordinals = append(ordinals, ordinal)
+	}
+	better := func(a, b int) int {
+		if c := cmp.Compare(scores[b], scores[a]); c != 0 {
 			return c
 		}
-		if c := cmp.Compare(a.Path, b.Path); c != 0 {
+		da, db := p.docs[a], p.docs[b]
+		if c := cmp.Compare(da.path, db.path); c != 0 {
 			return c
 		}
-		return cmp.Compare(a.Span.StartByte, b.Span.StartByte)
-	})
-	if len(matches) > k {
-		matches = matches[:k]
+		return cmp.Compare(da.span.StartByte, db.span.StartByte)
+	}
+	// The order is total, so selecting the best k and sorting only those is the same answer a full
+	// sort gives, at O(n) rather than O(n log n).
+	if len(ordinals) > k {
+		selectTopK(ordinals, k, better)
+		ordinals = ordinals[:k]
+	}
+	slices.SortFunc(ordinals, better)
+
+	matches := make([]Match, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		d := p.docs[ordinal]
+		matches = append(matches, Match{Path: d.path, Span: d.span, Score: scores[ordinal]})
 	}
 	return matches, nil
+}
+
+// searchTerm carries one query term's posting list and its scoring bounds.
+type searchTerm struct {
+	term    string
+	posting map[int]int
+	idf     float64
+	// bound is the most this term can add to any document. BM25's tf normalisation rises towards
+	// k1+1 as tf grows without limit and never reaches it, so idf*(k1+1) holds for every document
+	// whatever its length — which is what makes the MaxScore threshold safe rather than heuristic.
+	bound float64
+}
+
+// idfFor is Robertson/Sparck-Jones inverse document frequency with the +1 guard, so a term present
+// in every document scores zero rather than negative.
+func idfFor(liveCount, postingLen int) float64 {
+	return math.Log(1 + (float64(liveCount)-float64(postingLen)+0.5)/(float64(postingLen)+0.5))
+}
+
+// bm25Norm is BM25's term-frequency normalisation for one document.
+func bm25Norm(freq, length int, avgLen float64) float64 {
+	tf := float64(freq)
+	return tf * (bm25K1 + 1) / (tf + bm25K1*(1-bm25B+bm25B*float64(length)/avgLen))
+}
+
+// kthLargest returns the k-th largest score, which is a lower bound on the k-th best final score:
+// accumulators only ever grow, so a partial score is a floor on the final one.
+func kthLargest(scores map[int]float64, k int) float64 {
+	values := make([]float64, 0, len(scores))
+	for _, v := range scores {
+		values = append(values, v)
+	}
+	if k > len(values) {
+		return 0
+	}
+	// Descending, so index k-1 is the k-th largest.
+	slices.SortFunc(values, func(a, b float64) int { return cmp.Compare(b, a) })
+	return values[k-1]
+}
+
+// selectTopK partially orders a so that the k best elements under `better` occupy a[:k], in
+// unspecified order among themselves. Quickselect with a median-of-three pivot: the input arrives in
+// map-iteration order, and median-of-three keeps the already-sorted and reverse-sorted arrangements
+// off the quadratic path.
+func selectTopK(a []int, k int, better func(x, y int) int) {
+	lo, hi := 0, len(a)-1
+	for lo < hi {
+		p := partitionAround(a, lo, hi, better)
+		switch {
+		case p == k-1:
+			return
+		case p < k-1:
+			lo = p + 1
+		default:
+			hi = p - 1
+		}
+	}
+}
+
+func partitionAround(a []int, lo, hi int, better func(x, y int) int) int {
+	mid := lo + (hi-lo)/2
+	if better(a[mid], a[lo]) < 0 {
+		a[lo], a[mid] = a[mid], a[lo]
+	}
+	if better(a[hi], a[lo]) < 0 {
+		a[lo], a[hi] = a[hi], a[lo]
+	}
+	if better(a[hi], a[mid]) < 0 {
+		a[mid], a[hi] = a[hi], a[mid]
+	}
+	a[mid], a[hi] = a[hi], a[mid]
+	pivot := a[hi]
+	store := lo
+	for i := lo; i < hi; i++ {
+		if better(a[i], pivot) < 0 {
+			a[i], a[store] = a[store], a[i]
+			store++
+		}
+	}
+	a[store], a[hi] = a[hi], a[store]
+	return store
 }
 
 func dedupeTerms(terms []string) []string {

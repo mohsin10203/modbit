@@ -288,8 +288,8 @@ the contract against it, and let the engine decision be its own ADR. That gave `
 | CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
-| CTX-A01d3 | Early termination (MaxScore/WAND) in the in-process index | CTX-5, RET-1 | ⬜ Ready | **No dependency, no ADR, no owner decision.** 75.5 ms → ~12.5 µs on the query a user actually types, making the in-process index faster than any engine measured. Must land before CTX-A01d2 — see below |
-| CTX-A01d2 | Native lexical engine behind the port (SQLite FTS5 local / OpenSearch server) | CTX-5 | ⛔ Blocked | Blocked on ADR-0103 acceptance, not on the store question — PRD §40.2 already locks SQLite. ADR-0102 (**Proposed, revised**) recommends FTS5 for memory and persistence, *not* for latency; CTX-A01d3 first. Adapter cannot live in `pkg/index` (boundary test forbids `database/sql`) |
+| CTX-A01d3 | Early termination (MaxScore) and top-k selection in the in-process index | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`; L9 mutation-verified against an exhaustive reference (5 of 7 mutants caught, 2 documented). 75.5→40.9 ms on the realistic query, 182→119 ms on corpus-wide terms |
+| CTX-A01d2 | Native lexical engine behind the port (SQLite FTS5 local / OpenSearch server) | CTX-5 | ⛔ Blocked | Blocked on ADR-0103 acceptance, not on the store question — PRD §40.2 already locks SQLite. After CTX-A01d3 the in-process index is **faster than FTS5 on every measured shape**; the case for an engine is memory alone. Adapter cannot live in `pkg/index` (boundary test forbids `database/sql`) |
 | CTX-A01e | Symbol extraction and dependency graph — `SymbolExtractor`/`SymbolIndex` ports, stdlib Go extractor, import edges | CTX-5, CTX-7, CTX-12 | ✅ Qualified | `pkg/index/symbol.go`, 11 tests; G1–G8 mutation-verified |
 | CTX-A01e2 | tree-sitter extractor for the remaining languages | CTX-5 | ⬜ Ready | cgo dependency; needs an ADR. Implements `SymbolExtractor` without changing anything above it |
 | CTX-A01f | Semantic index — `VectorIndex` port, `Embedder` port, model-scoped partitions, in-process cosine | CTX-5, RET-1 | ✅ Qualified | `pkg/index/vector.go`, 14 tests; V1–V8 and V10 mutation-verified, V9 documented as structural |
@@ -414,27 +414,31 @@ Memory is linear at ~9 KB/file with nothing to gain at scale, and the index is r
 on every start. Extrapolated to a 100k-file repository: **~880 MB resident**, against a PRD §9.6
 target far larger again.
 
-**One query measured this wrong.** `BenchmarkLexicalQueryShape` varies the query at fixed scale
-(50k files), and the in-process index turns out not to be generally slow at all:
+**One query measured this wrong — twice.** `BenchmarkLexicalQueryShape` varies the query at fixed
+scale (50k files). After `CTX-A01d3`, with both engines given the **same** query:
 
 | query | in-process | FTS5 (cgo, pre-tokenized) |
 |---|---|---|
-| four corpus-wide terms | **182 ms** | 362 ms |
-| `handle4217` — one rare token | **12.5 µs** | 115 µs |
-| `Handle4217Item3` — what a user types | **75.5 ms** | 115 µs |
+| four corpus-wide terms | **119 ms** | 323 ms |
+| `handle4217` — one rare token, 2 hits | **13.9 µs** | 83 µs |
+| `Handle4217Item3` — what a user types | **40.9 ms** | 110 ms |
 
-It beats FTS5 by 9× on a rare token and by 2× when everything is a candidate. It collapses only on
-the third row: `splitIdentifier` cuts on case and underscore, so the identifier carries `item3` —
-which is in every file — and the scoring loop walks every posting of every term. **Cost tracks the
-query's most common term rather than its rarest.** FTS5 is not faster; its cost tracks the best term.
+The in-process index is faster on every shape. Two errors had to be corrected to see that:
 
-That splits one problem into two, and conflating them produced ADR-0102's first recommendation:
+1. **Scale was measured with one query**, which hid that cost tracks the query's most common term.
+   `splitIdentifier` cuts on case and underscore, so `Handle4217Item3` carries `item3` — in every
+   file — and the scoring loop walked every posting of every term. Fixed in `CTX-A01d3`: 75.5→40.9 ms.
+   MaxScore cannot do better, because it cannot start skipping until k candidates exist and only two
+   documents carry the rare terms; the other eighteen can only come from `item3`. **That is inherent
+   to returning k results, not a defect.**
+2. **The two engines were answering different queries.** FTS5 stored raw text, where the identifier is
+   one token matching 2 documents — reported as 115 µs against 75.5 ms. Given the same three-term
+   query and the same k, FTS5 takes **110 ms**. A comparison across two tokenizations is not one.
 
-1. **No early termination** — a defect in the query loop, fixable in place with MaxScore/WAND, no
-   dependency. Now tracked as `CTX-A01d3`, and it should land **first**: an engine adopted to fix a
-   latency problem that early termination solves for free is a dependency bought for nothing.
-2. **Memory-resident and rebuilt on start** — the part early termination cannot touch, and the actual
-   case for an on-disk engine.
+So latency is settled and is *not* an argument for an engine. What remains is **memory**: ~880 MB
+resident at 100k files, rebuilt from scratch at every launch. ADR-0102 now recommends FTS5 for that
+alone, and states the price — ~2.7× latency — rather than presenting it as a straight win. Deferring
+the engine entirely is recorded as a defensible alternative below ~20k files.
 
 **Tokenization is a compatibility constraint, not just a performance one.** FTS5's `unicode61` splits
 `snake_case` on the underscore but **not** `camelCase`, so storing raw source satisfies half of L6 and
