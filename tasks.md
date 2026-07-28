@@ -237,7 +237,7 @@ PRD §6.1. Docket §3.
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
-| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | 🚧 In Progress — state machine, tools, and steering Qualified (AGT-A01a/b/c); completion contract outstanding |
+| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | ✅ Qualified — every sub-item a–d complete; see AGT-A01 breakdown below |
 | EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | ⬜ Proposed |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
@@ -560,7 +560,7 @@ each invariant was broken in turn and the named test failed.
 | AGT-A01a | Run state machine — phases, modes, halt reasons, bounded loops, checkpoints, resume | RUN-1..RUN-6, COR-5 | ✅ Qualified | `pkg/agent/run.go`, 14 tests; A1–A9 mutation-verified |
 | AGT-A01b | Typed tool registry — versioned schemas, policy-gated invocation, taint propagation into results | TLS-1..TLS-7, INV-13 | ✅ Qualified | `pkg/agent/tool.go` + `schema.go`, 14 tests; T1–T9 mutation-verified |
 | AGT-A01c | Steering queue — ordered, durable, safe-boundary application, Interrupt Now | STR-1..STR-7 | ✅ Qualified | `pkg/agent/steering.go`, 12 tests; Q1–Q8 mutation-verified |
-| AGT-A01d | Completion contract — not-run / inconclusive / failed / passed | VER-1, VER-6 | ⬜ Ready | |
+| AGT-A01d | Completion contract — four verifier states, evidence record, revision-bound verdict | VER-1, VER-2, VER-6 | ✅ Qualified | `pkg/agent/completion.go`, 10 tests; P1–P7 mutation-verified |
 
 **AGT-A01a run protocol (A1–A9)**
 
@@ -594,6 +594,35 @@ All nine are mutation-verified.
 | 138 | A failed emit **rolls back** the phase | R-EVT-04 makes the state write and the event one act. A run that advanced while its event was lost is the exact divergence the rule prevents, so the transition is undone rather than reported as done. |
 | 139 | Halt reasons map onto **distinct** canonical events | A consumer filtering the audit log for failures must not also catch deliberate cancellations. Completion, failure, and cancellation keep their own types; the remaining five share `run.halted`, which carries the reason. |
 | 140 | `emit` takes no payload map | The canonical envelope carries payloads by reference (`Attributes.PayloadRef`), not inline. A map accepted and discarded reads as though the detail were recorded, which is worse than not offering it — the first draft did exactly that. What a halt records lives in the `Halt` value and the event type. |
+
+**AGT-A01d completion protocol (P1–P7)**
+
+VER-1, VER-2, VER-6. The contract decides whether a run may legitimately halt as `completed`. The
+four verifier states exist because two would not be enough: a check that did not run and a check that
+ran and passed are the same shape to anything recording booleans, and that conflation is how
+unverified work ships as verified.
+
+| # | Invariant |
+|---|---|
+| P1 | A verifier status is one of VER-6's four; the zero value is `not_run`, never `passed` |
+| P2 | `not_run` and `inconclusive` never count as passed |
+| P3 | A contract completes only when every required check passed |
+| P4 | Evidence records revision, environment, command, timestamps, and exit state |
+| P5 | Evidence output is bounded and its digest covers the whole |
+| P6 | A required failure halts as failed; a required gap halts as inconclusive |
+| P7 | Evidence from another revision does not satisfy a check |
+
+All seven are mutation-verified.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 158 | `not_run` is the **zero value** of `VerifierStatus` | A status field left unset must mean "nothing happened here". The alternative — an unset field that reads as a pass — is exactly the failure four states exist to prevent, and it is the same trap as `taint.Class`'s zero being `user_trusted` (decision 47). |
+| 159 | `Satisfies()` is a method, not a comparison at each call site | `== VerifierPassed` is easy to write and `!= VerifierFailed` is easier — and the second silently accepts both `not_run` and `inconclusive`. One method means one place to get it right. |
+| 160 | A failure **outranks** a gap | If anything is known to be broken, that is the finding to report. The two are otherwise distinct outcomes because the recovery differs: a failure needs the work fixed, a gap needs the check run. |
+| 161 | Evidence is bound to a revision, checked **before** the status | Evidence gathered before an edit proves nothing about the tree after it, and a *passing* result from another revision is the most convincing-looking way for stale evidence to slip through. Checking the revision after the status switch would have counted it as a pass. |
+| 162 | Later evidence for one check supersedes earlier | A re-run after a fix is the answer, not an additional opinion. This is also what makes staleness recoverable rather than terminal. |
+| 163 | A contract with no **required** check is refused | VER-1 requires every profile to define a contract, and one that gates on nothing is indistinguishable from no verification while looking like governance — worse than admitting a profile is unverified. |
+| 164 | Execution details are required only when the check **ran** | A check that did not run has no environment, command, or timing to give. Demanding them anyway would force callers to invent values, which is how a record stops meaning anything. |
 
 **AGT-A01b tool protocol (T1–T9)**
 
