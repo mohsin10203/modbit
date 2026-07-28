@@ -288,7 +288,7 @@ the contract against it, and let the engine decision be its own ADR. That gave `
 | CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
-| CTX-A01d2 | Native lexical engine behind the port (Tantivy local / OpenSearch server) | CTX-5 | ⬜ Ready | Engine choice needs an ADR under R-ARCH-01: Tantivy is Rust, so it means cgo or a sidecar |
+| CTX-A01d2 | Native lexical engine behind the port (Tantivy local / OpenSearch server) | CTX-5 | ⛔ Blocked | ADR-0102 (**Proposed**) measures the gap and recommends SQLite FTS5 *contingent on SQLite being adopted for local metadata*. Coupled to a decision nothing has taken yet — see below |
 | CTX-A01e | Symbol extraction and dependency graph — `SymbolExtractor`/`SymbolIndex` ports, stdlib Go extractor, import edges | CTX-5, CTX-7, CTX-12 | ✅ Qualified | `pkg/index/symbol.go`, 11 tests; G1–G8 mutation-verified |
 | CTX-A01e2 | tree-sitter extractor for the remaining languages | CTX-5 | ⬜ Ready | cgo dependency; needs an ADR. Implements `SymbolExtractor` without changing anything above it |
 | CTX-A01f | Semantic index — `VectorIndex` port, `Embedder` port, model-scoped partitions, in-process cosine | CTX-5, RET-1 | ✅ Qualified | `pkg/index/vector.go`, 14 tests; V1–V8 and V10 mutation-verified, V9 documented as structural |
@@ -395,6 +395,39 @@ were mutation-verified.
 | 96 | A scan or apply failure **returns** from `Run` | A loop that retried quietly would report a fresh index while diverging from the tree — the silent degradation R-ERR-05 and SDD §15 both forbid. The caller decides whether to restart, because only the caller knows whether a failing walk is transient. |
 | 97 | A source that stops flushes what it already has | A watcher shutting down is not a reason to discard edits the user already made. |
 | 98 | `PollSource` declares itself on every batch | It cannot observe individual changes, so every batch is a `Rescan` carrying `poll_interval`. Presenting a rebuild as an update would hide that this deployment has no native watcher — and it is the floor, not the target: a full walk does not meet CTX-2 on a large tree. |
+
+**CTX-A01d2 — measured before proposing an engine (ADR-0102)**
+
+The question was framed as "which engine", but the first thing to establish was whether the shipped
+in-process index actually needs replacing, and at what size — because that decides how much
+dependency is worth taking. `BenchmarkLexicalIndexScale` answers it with a code-shaped synthetic
+corpus:
+
+| documents | search latency | heap | bytes/document |
+|---|---|---|---|
+| 1,000 | 1.5 ms | 9.2 MB | 9,663 |
+| 10,000 | 19.4 ms | 90 MB | 9,454 |
+| 50,000 | 228 ms | 417 MB | 8,746 |
+
+Memory is linear at ~9 KB/document with nothing to gain at scale. Latency is **superlinear** —
+ten times the documents costs thirteen times the latency, five times again costs twelve. Extrapolated
+to a 100k-file repository (~500k chunks): **~4.4 GB resident and multi-second queries**, against a
+PRD §9.6 target twenty times larger again. No constant-factor tuning closes a gap of that shape.
+
+The algorithm is not the problem — BM25 is right and the implementation agrees with it. Two
+structural properties are: the index is memory-resident, and query evaluation is exhaustive with no
+skip structure. Both are what an on-disk segmented index solves.
+
+**ADR-0102 is Proposed, not Accepted, and deliberately so.** It recommends SQLite FTS5 *contingent
+on SQLite being adopted for local metadata* (PRD §6.1 specifies it; nothing in the repository has
+committed to it). That is the only option whose dependency cost may already be paid for another
+reason. Bleve is the pure-Go fallback; Tantivy-via-cgo is for when latency becomes binding, since it
+makes cross-compilation a project. **The two questions are coupled** — answering the search question
+first would likely force the store decision — so the ADR stops at a recommendation rather than
+taking it.
+
+The benchmark stays as the gate: an engine that does not beat these numbers has not earned its
+dependency.
 
 **CTX-A01d lexical protocol (L1–L8)**
 
