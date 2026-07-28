@@ -250,7 +250,7 @@ type partition struct {
 	// what that path contributed.
 	byPath map[string][]int
 	// postings maps a term to the ordinals containing it and the count in each.
-	postings map[string]map[int]int
+	postings map[string]*postingList
 	// free lists ordinals vacated by removals, so a long-lived index does not grow without bound.
 	free      []int
 	totalLen  int
@@ -258,8 +258,16 @@ type partition struct {
 }
 
 type docEntry struct {
-	path   string
-	span   Span
+	path string
+	span Span
+	// terms are the posting lists this document appears in, so retraction can reach its own
+	// entries instead of searching the whole dictionary for them.
+	//
+	// Pointers rather than strings or interned ids, because this is the (document, term) pairing
+	// `postings` already holds and a second copy is what makes it expensive. Strings measured as
+	// +400 MB on a 50,000-file corpus; an id plus an intern table cost a second map over the same
+	// keys. A pointer is eight bytes and needs no side table at all.
+	terms  []*postingList
 	length int
 	live   bool
 }
@@ -277,7 +285,7 @@ func (m *MemoryIndex) partitionFor(revision Revision, create bool) *partition {
 	if p == nil && create {
 		p = &partition{
 			byPath:   make(map[string][]int),
-			postings: make(map[string]map[int]int),
+			postings: make(map[string]*postingList),
 		}
 		m.partitions[key] = p
 	}
@@ -325,6 +333,15 @@ func (m *MemoryIndex) Remove(revision Revision, paths ...string) error {
 	return nil
 }
 
+// postingList holds the documents containing one term.
+//
+// The term is carried alongside its documents so that emptying the list can remove it from the
+// dictionary; that is the only reason this is a struct rather than a bare map.
+type postingList struct {
+	term string
+	docs map[int]int
+}
+
 func (p *partition) add(d Document) {
 	terms := tokenize(d.Text)
 	if len(terms) == 0 {
@@ -341,18 +358,29 @@ func (p *partition) add(d Document) {
 	}
 
 	path := normalizePath(d.Path)
-	p.docs[ordinal] = docEntry{path: path, span: d.Span, length: len(terms), live: true}
 	p.byPath[path] = append(p.byPath[path], ordinal)
 	p.totalLen += len(terms)
 	p.liveCount++
 
+	// The distinct terms are recorded as they are first seen, so retract can reach exactly this
+	// document's postings instead of searching the whole term dictionary for them.
+	var distinct []*postingList
 	for _, term := range terms {
 		posting := p.postings[term]
 		if posting == nil {
-			posting = make(map[int]int)
+			posting = &postingList{term: term, docs: make(map[int]int)}
 			p.postings[term] = posting
 		}
-		posting[ordinal]++
+		if posting.docs[ordinal] == 0 {
+			distinct = append(distinct, posting)
+		}
+		posting.docs[ordinal]++
+	}
+	// Clipped because append leaves growth slack, and this slice is retained for the lifetime of
+	// the document: on a large corpus the unused capacity is tens of megabytes.
+	distinct = slices.Clip(distinct)
+	p.docs[ordinal] = docEntry{
+		path: path, span: d.Span, length: len(terms), live: true, terms: distinct,
 	}
 }
 
@@ -363,27 +391,26 @@ func (p *partition) retract(path string) {
 	if len(ordinals) == 0 {
 		return
 	}
-	live := make(map[int]bool, len(ordinals))
 	for _, ordinal := range ordinals {
-		if !p.docs[ordinal].live {
+		d := p.docs[ordinal]
+		if !d.live {
 			continue
 		}
-		live[ordinal] = true
-		p.totalLen -= p.docs[ordinal].length
+		// Only this document's own terms are visited. Scanning every posting list instead costs the
+		// whole term dictionary per edit, which is invisible on a test-sized corpus and is minutes
+		// per keystroke on a Standard repository — the defect QA-A01c's LCX-3 gate caught.
+		for _, posting := range d.terms {
+			delete(posting.docs, ordinal)
+			if len(posting.docs) == 0 {
+				delete(p.postings, posting.term)
+			}
+		}
+		p.totalLen -= d.length
 		p.liveCount--
 		p.docs[ordinal] = docEntry{}
 		p.free = append(p.free, ordinal)
 	}
 	delete(p.byPath, path)
-
-	for term, posting := range p.postings {
-		for ordinal := range live {
-			delete(posting, ordinal)
-		}
-		if len(posting) == 0 {
-			delete(p.postings, term)
-		}
-	}
 }
 
 // Search implements LexicalIndex.
@@ -414,11 +441,11 @@ func (m *MemoryIndex) Search(revision Revision, query string, k int) ([]Match, e
 	stats := make([]searchTerm, 0, len(terms))
 	for _, term := range dedupeTerms(terms) {
 		posting := p.postings[term]
-		if len(posting) == 0 {
+		if posting == nil || len(posting.docs) == 0 {
 			continue
 		}
-		idf := idfFor(p.liveCount, len(posting))
-		stats = append(stats, searchTerm{term: term, posting: posting, idf: idf, bound: idf * (bm25K1 + 1)})
+		idf := idfFor(p.liveCount, len(posting.docs))
+		stats = append(stats, searchTerm{term: term, posting: posting.docs, idf: idf, bound: idf * (bm25K1 + 1)})
 	}
 	if len(stats) == 0 {
 		return nil, nil

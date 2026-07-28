@@ -641,7 +641,7 @@ each invariant was broken in turn and the named test failed.
 | B-9 | `IgnoreFileNames` was a **map**, so the order the three ignore files applied in was random | Resolution is last-match-wins, so map iteration order decided which file won when two disagreed — a repository could get different indexing decisions on consecutive runs. | Replaced by the ordered `IgnoreFiles` slice; the order is now documented as contract. |
 | B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
-| QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | 🚧 In Progress — capability-evidence gate Qualified (QA-A01a); event conformance, performance gates, and benchmark smoke outstanding |
+| QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | 🚧 In Progress — capability-evidence gate (QA-A01a) and performance gates (QA-A01c) Qualified; event conformance outstanding |
 
 ### SET-A01 breakdown
 
@@ -722,7 +722,46 @@ property of its key.
 |---|---|---|---|---|
 | QA-A01a | Capability-evidence gate — every cited test must exist; orphaned security tests reported | R-TST-01, R-TST-05 | ✅ Qualified | `tools/modbitgen/evidence.go`; 193 cited tests verified, 0 orphans |
 | QA-A01b | Client/API event conformance | R-EVT-01..08 | ⬜ Ready | |
-| QA-A01c | Performance gates and benchmark smoke | PRD §7 | ⬜ Ready | `test-benchmark-smoke` exists but asserts no thresholds |
+| QA-A01c | Performance gates and benchmark smoke | PRD §7, §8A.3 | ✅ Qualified | `pkg/index/perf_test.go` + `make perf-gate`. LCX-2/3/4 measured as p95 per PRD §8A.3, per repository class, each budget marked enforced or known gap. Found and fixed an O(vocabulary)-per-edit defect in `retract` — see below |
+
+**QA-A01c — the gate found an O(vocabulary) defect on its first run**
+
+`test-benchmark-smoke` ran every benchmark and asserted nothing, so PRD §8A.3's budgets were
+documented and unmeasured. `make perf-gate` now measures them as **p95** — the form the PRD states
+them in, and not what a benchmark's mean reports — per repository class (§8A.3: Small ≤10k files,
+Standard ≤100k), with each budget marked `enforced` or `known gap`. A known gap is logged loudly,
+does not fail, and **fails if it starts passing**: an unrecorded commitment is how the next
+regression goes unnoticed.
+
+Its first run did not report a number, it **hung for twenty minutes**. `partition.retract` scanned
+every posting list in the partition to delete one document's entries — invisible at test-corpus size
+and, on a Standard repository with millions of distinct terms, seconds per edited file. LCX-3 gives
+incremental edits a 500 ms budget. Fixed by recording each document's own posting lists so retraction
+touches only those; `retract` went from O(vocabulary) to O(terms in the document).
+
+The representation mattered more than the fix. Storing the terms as strings cost **+400 MB** on a
+50k-file corpus — the (document, term) pairing is what `postings` already holds, and a second copy at
+a string header apiece nearly doubled the index. Interned ids needed a second map over the same keys.
+Storing the posting-list pointer needs no side table at all: **+18% memory** (9.4 → 11.1 KB/file) to
+remove the scan.
+
+Measured on an idle M2, Go 1.24:
+
+| | Small (10k files) | Standard (100k files) |
+|---|---|---|
+| Resident | 106 MB | **994 MB** |
+| LCX-2 initial indexing (budget 90 s) | 5.1 s ✅ | **2 m 45 s** ⛔ |
+| LCX-4 warm retrieval p95 (budget 50 ms) | 40.4 ms ✅ | **383 ms** ⛔ |
+| LCX-3 incremental edit p95 (budget 500 ms) | 8.7 ms ✅ | 7.4 ms ✅ |
+
+994 MB confirms ADR-0102's ~880 MB extrapolation, and the per-shape breakdown confirms its diagnosis:
+at Standard scale a rare token answers in **797 µs** while corpus-wide terms take 484 ms. Selectivity,
+not scale, decides retrieval cost.
+
+**Two caveats on the numbers.** These are wall-clock budgets and need a quiet machine — an early run
+reported LCX-4 at 286 ms where the idle figure was 21 ms, entirely from concurrent benchmark
+processes; the gate's promote-me error is what surfaced it. And Small's aggregate sits at 40 ms
+against a 50 ms budget, close enough that it will be the first thing to go flaky.
 
 **QA-A01a — the registry could lie about its own evidence**
 

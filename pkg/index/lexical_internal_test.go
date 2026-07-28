@@ -47,11 +47,11 @@ func referenceSearch(m *MemoryIndex, revision Revision, query string, k int) []M
 	scores := map[int]float64{}
 	for _, term := range dedupeTerms(terms) {
 		posting := p.postings[term]
-		if len(posting) == 0 {
+		if posting == nil || len(posting.docs) == 0 {
 			continue
 		}
-		idf := idfFor(p.liveCount, len(posting))
-		for ordinal, freq := range posting {
+		idf := idfFor(p.liveCount, len(posting.docs))
+		for ordinal, freq := range posting.docs {
 			d := p.docs[ordinal]
 			if !d.live {
 				continue

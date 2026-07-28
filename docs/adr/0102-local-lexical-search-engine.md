@@ -97,9 +97,23 @@ snippets come from the file through `Cite`, never from the index.
 The algorithm is not the problem — BM25 is right and the implementation agrees with it. **Latency is
 not the problem either**, which took two revisions to establish. One thing remains:
 
-**The index is memory-resident and rebuilt on every start.** ~880 MB at 100,000 files, bounded by RAM
-rather than disk, and paid again at every launch. Early termination cannot touch this, and it is the
-entire remaining case for an engine.
+**The index is memory-resident and rebuilt on every start.** Early termination cannot touch this, and
+it is the entire remaining case for an engine.
+
+`QA-A01c`'s gate has since measured a Standard-class repository directly rather than by
+extrapolation, and it is worse than the projection on the axis that matters least and confirms it on
+the axis that matters most:
+
+| PRD §8A.3 budget | Standard (100k files) | verdict |
+|---|---|---|
+| Resident memory | **994 MB** | confirms the ~880 MB projection |
+| LCX-2 initial indexing, 90 s | 2 m 45 s | over |
+| LCX-4 warm retrieval p95, 50 ms | 383 ms | over |
+| LCX-3 incremental edit p95, 500 ms | 7.4 ms | within |
+
+The per-shape breakdown confirms this ADR's diagnosis exactly: at 100k files a rare token still
+answers in **797 µs** while four corpus-wide terms take 484 ms. Selectivity decides retrieval cost,
+not corpus size — which is why LCX-4's aggregate is carried entirely by the worst query shape.
 
 ## Options
 

@@ -100,6 +100,16 @@ test-conformance: ## Shared contract conformance suites (R-TST-06)
 test-benchmark-smoke: ## Benchmark smoke run, one iteration per benchmark
 	$(GO) test -run '^$$' -bench . -benchtime 1x $(GO_PKGS)
 
+# Deliberately outside `check` (QA-A01c): building a Standard-class corpus takes minutes, and a gate
+# that slows the edit-test loop is one people stop running. CI runs it; `check` stays fast.
+#
+# Budgets are PRD §8A.3's, measured as p95 rather than as a mean, and each names its requirement.
+# A budget carried as a known gap fails if it starts *passing* — an unrecorded commitment is how the
+# next regression goes unnoticed.
+.PHONY: perf-gate
+perf-gate: ## Performance budgets from PRD §8A.3 (LCX-2, LCX-3, LCX-4)
+	$(GO) test -tags=perf -count=1 -timeout 30m -run 'TestPerformanceBudget' -v $(GO_PKGS)
+
 # --------------------------------------------------------------------------------------------
 # Data
 # --------------------------------------------------------------------------------------------
