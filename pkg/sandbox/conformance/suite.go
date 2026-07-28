@@ -17,6 +17,7 @@ package conformance
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -296,8 +297,80 @@ func (r *runner) checkNetworkDeny(ctx context.Context) {
 		r.record(area, StatusSkipped, "backend does not claim enforced network deny")
 		return
 	}
-	r.record(area, StatusInconclusive,
-		"the suite has no probe that can distinguish a denied egress from an unreachable host without a controlled endpoint")
+
+	// The probe binds its own loopback listener. A public address could not distinguish a denied
+	// egress from an unreachable host, which is why this was Inconclusive until a backend actually
+	// claimed the control — the suite refusing to pass an undemonstrated claim is what forced the
+	// probe to exist.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		r.record(area, StatusInconclusive, "a loopback listener could not be bound")
+		return
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	dir, cleanup, err := r.workspace()
+	if err != nil {
+		r.record(area, StatusInconclusive, "workspace could not be created")
+		return
+	}
+	defer cleanup()
+
+	session, err := r.establish(ctx, dir)
+	if err != nil {
+		r.record(area, StatusInconclusive, "sandbox could not be established")
+		return
+	}
+	defer func() { _ = r.backend.Cleanup(ctx, session) }()
+
+	shell := probeShell()
+	if shell == "" {
+		r.record(area, StatusInconclusive, "no probe available on this platform")
+		return
+	}
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		r.record(area, StatusInconclusive, "listener address could not be parsed")
+		return
+	}
+
+	// The control: the listener is reachable from outside the sandbox, so a failure inside is the
+	// confinement rather than a broken fixture.
+	if conn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second); err != nil {
+		r.record(area, StatusInconclusive, "the probe listener was unreachable even outside the sandbox")
+		return
+	} else {
+		_ = conn.Close()
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, r.opts.CommandTimeout)
+	defer cancel()
+	result, err := r.backend.Run(callCtx, session, sandbox.Command{
+		Path: shell,
+		Args: []string{"-c", "nc -z -w2 127.0.0.1 " + port + " && echo CONNECTED || echo REFUSED"},
+	})
+	if err != nil {
+		r.record(area, StatusInconclusive, "the network probe could not be run")
+		return
+	}
+	if strings.Contains(result.Stdout, "CONNECTED") {
+		r.record(area, StatusFail, "a confined command reached a listening socket")
+		return
+	}
+	if !strings.Contains(result.Stdout, "REFUSED") {
+		r.record(area, StatusInconclusive, "the network probe produced no verdict")
+		return
+	}
+	r.record(area, StatusPass, "")
 }
 
 func (r *runner) checkResourceLimits(ctx context.Context) {

@@ -238,7 +238,7 @@ PRD §6.1. Docket §3.
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
 | AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | ✅ Qualified — every sub-item a–d complete; see AGT-A01 breakdown below |
-| EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | 🚧 In Progress — contract, conformance suite, and portable backend Qualified (EXE-A01a); native backends are ADR-gated, see below |
+| EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | 🚧 In Progress — contract, suite, portable backend, and macOS confinement Qualified (EXE-A01a/b); Linux and container backends remain |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
 ### CTX-A01 breakdown
@@ -667,9 +667,46 @@ fails. Registry now stands at 7 capabilities, 193 cited tests, 0 orphaned securi
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
 | EXE-A01a | Backend contract, SBX-5 conformance suite, portable process backend | SBX-1..SBX-6, EXE-7, EXE-9 | ✅ Qualified | `pkg/sandbox`, 12 tests; X1–X8 mutation-verified |
-| EXE-A01b | Native macOS backend (Seatbelt) | EXE-4, EXE-5, EXE-6 | ⬜ Ready | ADR-0100 open decision 1. `sandbox_init(3)` is deprecated but functional; needs cgo or `sandbox-exec` |
+| EXE-A01b | Native macOS backend (Seatbelt) | EXE-4, EXE-6 | ✅ Qualified | `pkg/sandbox/seatbelt_darwin.go`, 5 tests; ADR-0101. Enforces filesystem scope and network deny; SBX-5 suite 6 pass / 0 inconclusive |
 | EXE-A01c | Native Linux backend (namespaces + seccomp) | EXE-4, EXE-5, EXE-6 | ⬜ Ready | Achievable via `syscall` without a dependency; cgroup v2 for EXE-5 |
 | EXE-A01d | Container and microVM backends | SBX-1, SBX-4 | ⬜ Proposed | ADR-0100 open decision 4 (microVM technology) |
+
+**EXE-A01b macOS confinement (ADR-0101)**
+
+`EXE-A01a` left macOS — the platform an IDE actually runs on — with no enforced filesystem scope and
+no enforced network deny. ADR-0101 resolves ADR-0100's open decision 1 by adopting `sandbox-exec`.
+
+**Measured before deciding**, on macOS 26.5.1: a write outside the workspace is refused by the kernel
+rather than by a shell check, a write inside is permitted once the profile names the symlink-resolved
+path, and an outbound connect under a deny-network profile is refused. No cgo, no dependency.
+
+The accepted risk is that Apple deprecated the interface. There is no supported replacement for
+per-command confinement of a child process, and the alternative reaches the *same* deprecated
+mechanism through cgo. The mitigation is structural: it is a `Backend` behind SBX-1, so replacing it
+is one implementation rather than a migration, and `NewSeatbeltBackend` probes for the binary and
+refuses rather than degrading silently.
+
+**Three defects the work surfaced, all found by the suite rather than by review:**
+
+| # | Defect | Fix |
+|---|---|---|
+| B-13 | `Establish` delegated to the process backend **with `Required` intact**, so the inner backend re-ran the requirement check against its own weaker capabilities and refused the very controls this backend exists to add | The inner spec clears `Required` and `MinimumStrength`; the outer check already ran against the stronger capabilities |
+| B-14 | The profile allowed writes to `/private/var/folders` for toolchain temp files, which made "filesystem scope enforced" **false** — the suite's escape probe writes to `os.TempDir()` and succeeded | Temp writes are confined to `<workspace>/.modbit-tmp` with `TMPDIR` pointed at it, so the claim and the profile agree |
+| B-15 | The suite's `network_deny` probe was Inconclusive, which blocked readiness the moment a backend genuinely claimed the control | A real probe: the suite binds its own loopback listener, verifies it is reachable from outside the sandbox, then requires the confined command to be refused. A public address could not distinguish a denied egress from an unreachable host |
+
+B-15 is the suite's design working exactly as intended. "A declared control the suite cannot
+demonstrate is Inconclusive, and Inconclusive blocks readiness" was written to catch an over-claiming
+backend; what it actually caught first was a **missing probe**, which is the same statement from the
+other side.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 185 | The workspace path is **symlink-resolved** before the profile is generated | A profile's `(subpath ...)` matches the resolved path, so a workspace under `/var/folders` is not matched by a rule naming `/var/...` — the kernel sees `/private/var/...`. The unresolved path produces a profile that denies everything including the workspace itself: a sandbox that looks configured and breaks the run. |
+| 186 | A path containing SBPL syntax is **refused**, not escaped | SBPL is Lisp-like, and a workspace path is attacker-influenced when a run is pointed at a checked-out repository. An unescaped quote or paren would close the string and let the remainder become profile *source* — arbitrary sandbox rules chosen by whoever named the directory. Escaping is a thing to get subtly wrong once; refusal is not, and a directory whose name requires escaping is not one Modbit needs to confine. |
+| 187 | Strength stays `StrengthProcess` | `sandbox-exec` confines a process, it does not virtualize one. Claiming `StrengthContainer` would let a profile demanding container isolation select something that is not one (SBX-4). |
+| 188 | Reads stay broad; only **writes** are scoped | A build reads toolchains, headers, and libraries from all over the system, and narrowing that is a compatibility project rather than a confinement one. What must not leave is covered by the egress deny and by the classifier deciding what is ever read into an index. |
+| 189 | `(deny network*)` is kept although `(deny default)` already covers it | Measured both ways: deny-default with no network line refuses a connect, and allow-default with only the network line also refuses one. The explicit line is what keeps egress denied if the default is ever loosened for a compatibility reason, and it is labelled so the next reader does not delete it as redundant. |
+| 190 | `Run` delegates to the process backend rather than re-implementing execution | Working-directory resolution, environment replacement, hook suppression, and cancellation stay in one place. A second copy would drift, and the copy that drifted would be the confined one. |
 
 **EXE-A01a sandbox protocol (X1–X8)**
 

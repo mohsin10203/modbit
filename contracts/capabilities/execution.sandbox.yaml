@@ -55,4 +55,10 @@ tests:
   - pkg/sandbox:TestSuiteCoversEverySBX5Area
   - pkg/sandbox:TestSecurityAnUnexercisedClaimBlocksReadiness
   - pkg/sandbox:TestValidateSpecRefusesAMalformedSpec
+  # macOS confinement (EXE-A01b, ADR-0101). Build-tagged darwin; skipped elsewhere.
+  - pkg/sandbox:TestSecuritySeatbeltEnforcesFilesystemScope
+  - pkg/sandbox:TestSecuritySeatbeltDeniesNetworkEgress
+  - pkg/sandbox:TestSecurityAWorkspacePathCannotInjectProfileRules
+  - pkg/sandbox:TestSecuritySeatbeltDoesNotClaimContainerStrength
+  - pkg/sandbox:TestSeatbeltPassesTheSharedConformanceSuite
   - conformance/execution-sandbox
