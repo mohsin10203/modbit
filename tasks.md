@@ -238,7 +238,7 @@ PRD §6.1. Docket §3.
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
 | AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | ✅ Qualified — every sub-item a–d complete; see AGT-A01 breakdown below |
-| EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | ⬜ Proposed |
+| EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | 🚧 In Progress — contract, conformance suite, and portable backend Qualified (EXE-A01a); native backends are ADR-gated, see below |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
 ### CTX-A01 breakdown
@@ -552,6 +552,56 @@ each invariant was broken in turn and the named test failed.
 | B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
 | QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | ⬜ Proposed |
+
+### EXE-A01 breakdown
+
+| ID | Task | Requirements | Status | Evidence |
+|---|---|---|---|---|
+| EXE-A01a | Backend contract, SBX-5 conformance suite, portable process backend | SBX-1..SBX-6, EXE-7, EXE-9 | ✅ Qualified | `pkg/sandbox`, 12 tests; X1–X8 mutation-verified |
+| EXE-A01b | Native macOS backend (Seatbelt) | EXE-4, EXE-5, EXE-6 | ⬜ Ready | ADR-0100 open decision 1. `sandbox_init(3)` is deprecated but functional; needs cgo or `sandbox-exec` |
+| EXE-A01c | Native Linux backend (namespaces + seccomp) | EXE-4, EXE-5, EXE-6 | ⬜ Ready | Achievable via `syscall` without a dependency; cgroup v2 for EXE-5 |
+| EXE-A01d | Container and microVM backends | SBX-1, SBX-4 | ⬜ Proposed | ADR-0100 open decision 4 (microVM technology) |
+
+**EXE-A01a sandbox protocol (X1–X8)**
+
+SBX-1 requires every backend — native, container, microVM — to implement one versioned contract, and
+SBX-3 is why the contract looks the way it does: a backend must not report a policy as enforced when
+it is advisory, so enforcement level is a declared per-control value rather than a boolean the caller
+infers.
+
+| # | Invariant |
+|---|---|
+| X1 | A backend declares an enforcement level for every control; there is no default |
+| X2 | A control a backend cannot enforce is never reported as enforced |
+| X3 | A spec requiring a control the backend does not enforce fails closed at establishment |
+| X4 | Degraded isolation requires an explicit, recorded permission |
+| X5 | Every backend answers one versioned contract |
+| X6 | Isolation strength is ordered, so a profile can require a minimum |
+| X7 | The conformance suite covers all ten SBX-5 areas |
+| X8 | An unexercised conformance claim is not a pass |
+
+All eight are mutation-verified.
+
+**The portable backend's weakness is the deliverable.** Go's standard library offers no portable way
+to confine a child's filesystem access, deny its egress, or cap CPU and memory: `syscall.Setrlimit`
+applies to the calling process rather than a child, and darwin's `SysProcAttr` carries no namespace,
+seccomp, or rlimit fields at all. A backend that set a working directory and called that "filesystem
+scope" would be reporting an advisory arrangement as an enforced one — precisely what SBX-3 forbids.
+So `ProcessBackend` declares filesystem scope and process confinement **advisory**, CPU, memory,
+process, disk, and network **unsupported**, and only wall-clock and hook suppression **enforced**;
+the contract then makes that honesty consequential, because a profile requiring confinement cannot
+establish against it and one requiring container strength cannot select it.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 165 | Enforcement is a **per-control declared level**, not a boolean | SBX-3 distinguishes enforced from advisory, and a boolean cannot carry that distinction. `EnforcementUnsupported` is the zero value so a control omitted from a capability map reads as "not enforced" — the only safe reading of no answer, and the third instance of this pattern after `taint.Class`'s zero and `VerifierStatus`'s. |
+| 166 | `Enforces()` is a method | `!= unsupported` is the easy thing to write and it silently accepts advisory, which is the exact conflation SBX-3 forbids. One method means one place to get it right. |
+| 167 | `Check` is a shared function, not per-backend logic | SBX-1's "same versioned contract" is worth little if each backend decides for itself what "required" means. Fail-closed establishment lives in one place that every backend calls. |
+| 168 | Degradation needs `AllowDegraded` **and** a rationale, both recorded on the session | SBX-6 permits degraded isolation only where a documented policy explicitly says so. A boolean on its own is a switch somebody flips during an incident with nothing to show afterwards. |
+| 169 | `AllowDegraded` cannot bypass `MinimumStrength` | Strength is what a high-risk profile is choosing, not a control it is trading away. A microVM requirement satisfied by "allow degraded" would make SBX-4 advisory. |
+| 170 | A declared-but-undemonstrated control is **Inconclusive**, not Skipped | Skipped would let an over-claiming backend look clean; Pass would be the SBX-3 violation itself. A control honestly declared unsupported is Skipped, because there is no claim to check — so honesty is rewarded and over-claiming is caught. `TestSecurityAnUnexercisedClaimBlocksReadiness` runs the suite against a deliberately over-claiming backend to prove it. |
+| 171 | Cleanup removes only what the backend created | Deleting a caller-supplied workspace would destroy a user's checkout. Cleanup is idempotent, and a cleaned-up session refuses to run anything, since its workspace may be gone. |
+| 172 | The child's environment is **replaced**, not inherited | EXE-7 disables repository-defined hooks, and the same mechanism closes a wider hole: a credential in the operator's shell must not reach repository code. Git is pointed at an empty `core.hooksPath` via `GIT_CONFIG_*`, which a repository's own config cannot override. |
 
 ### AGT-A01 breakdown
 
