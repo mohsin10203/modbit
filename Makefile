@@ -100,6 +100,20 @@ test-conformance: ## Shared contract conformance suites (R-TST-06)
 test-benchmark-smoke: ## Benchmark smoke run, one iteration per benchmark
 	$(GO) test -run '^$$' -bench . -benchtime 1x $(GO_PKGS)
 
+# The platform backends are build-tagged, so a package that fails to compile for a target nobody
+# builds locally stays broken until CI or a release finds it. This caught modberr.CodeUnimplemented
+# -- a code that does not exist -- in the FSEvents fallback, which only compiles when cgo is off.
+#
+# CGO_ENABLED=0 throughout: this checks that every target still *builds*, which is the property
+# build tags are supposed to preserve. Building the cgo backends for other platforms needs a C
+# toolchain per target and is the open question in ADR-0103.
+.PHONY: cross-check
+cross-check: ## Build every supported target with cgo disabled
+	@for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do \
+		GOOS=$${pair%/*} GOARCH=$${pair#*/} CGO_ENABLED=0 $(GO) build ./... \
+			&& echo "cross-check $$pair: ok" || exit 1; \
+	done
+
 # Deliberately outside `check` (QA-A01c): building a Standard-class corpus takes minutes, and a gate
 # that slows the edit-test loop is one people stop running. CI runs it; `check` stays fast.
 #

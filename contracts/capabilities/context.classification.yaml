@@ -96,6 +96,12 @@ tests:
   # that it can actually fail.
   - pkg/index:TestPollSourceIsConformant
   - pkg/index:TestSecurityChangeSourceConformanceDetectsALeakedReader
+  # Native macOS backend (CTX-A01c3, ADR-0104). The first source to exercise D7 — the delta path
+  # was Skipped everywhere while PollSource, which only rescans, was the sole implementation.
+  - pkg/index/fsevents:TestFSEventsSourceIsConformant
+  - pkg/index/fsevents:TestAWriteIsReportedRelativeToTheWatchedRoot
+  - pkg/index/fsevents:TestADeletedFileIsReportedAsRemoved
+  - pkg/index/fsevents:TestSecurityAnUnwatchableRootIsRefused
   # Lexical channel (CTX-A01d).
   - pkg/index:TestSecurityLexicalResultsNeverCrossRevisions
   - pkg/index:TestSecurityOnlyIndexableContentCanBeChunked

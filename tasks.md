@@ -284,8 +284,8 @@ the contract against it, and let the engine decision be its own ADR. That gave `
 | CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ✅ Qualified | `pkg/index/walk.go`, 19 tests incl. 4 security suites |
 | CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | ✅ Qualified | `pkg/index/reindex.go` + `watch.go`, 29 tests. Reindex engine, scoped rescan, flush policy, and the watcher loop are complete; native backends are tracked separately as CTX-A01c3–c5 |
 | CTX-A01c2 | `ChangeSource` port + `Watcher` driver + portable `PollSource`, incl. queue-overflow → `Rescan` | CTX-2 | ✅ Qualified | `pkg/index/watch.go`, 12 tests; W1–W8 mutation-verified |
-| CTX-A01c2b | Shared `ChangeSource` conformance suite (D1–D8) | CTX-2 | ✅ Qualified | `pkg/index/conformance`; `PollSource` is its first subject, 6 mutants caught. **CTX-A01c3–c5 must each pass it** — see below |
-| CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | ⬜ Ready | Recursive, one watch per tree. The only backend that meets CTX-2 on a large tree on the primary developer platform — see the watcher dependency finding below |
+| CTX-A01c2b | Shared `ChangeSource` conformance suite (D1–D9) | CTX-2 | ✅ Qualified | `pkg/index/conformance`; `PollSource` and FSEvents are its subjects, 11 mutants caught across both. D9 (goroutine release) was added because FSEvents exposed a leak D1–D8 could not see |
+| CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | 🚧 Review | `pkg/index/fsevents`, cgo, **no new module**. Passes D1–D9 and is the first source to exercise D7. 49 ms median notification vs CTX-2's 10 s. ADR-0104 (**Proposed**) — nothing selects it yet; making it the macOS default is the open decision |
 | CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
@@ -420,6 +420,55 @@ hang and time out — D4 detects exactly that, but D1, D2 and D3 all call `Close
 before D4 ran. In CI that is a timeout with no attribution, which is worse than a named failure.
 Every `Close` the suite performs is now bounded, so a blocking `Close` is reported by D2, D3 and D4
 together instead of hanging the run.
+
+**CTX-A01c3 — the kqueue ceiling, measured (ADR-0104)**
+
+The reason for rejecting a portable watcher library was previously asserted. It is now measured:
+`kern.maxfilesperproc` is **10240**. Portable Go watchers use kqueue on macOS, which needs an open
+descriptor per watched *file*, so that design tops out at roughly ten thousand — and PRD §8A.3 puts
+the Small/Standard boundary at exactly 10,000. The failure is silent: descriptors run out, watches
+are dropped, the index goes quietly stale.
+
+FSEvents takes one stream for a whole tree at any depth and costs no per-file descriptor.
+
+| | FSEvents | `PollSource` |
+|---|---|---|
+| Watches for a whole tree | **1** | n/a |
+| Notification latency, median | **49 ms** | 2 s tick, then a full walk |
+| Delivery | per-file deltas | every batch a full `Rescan` |
+| 500 rapid writes | 501 callbacks | 1 rescan + 1 full walk |
+
+**Dependency cost is zero modules** — CoreServices is a system framework, `go.mod` is unchanged. The
+cost is cgo on macOS, and `make cross-check` verifies `CGO_ENABLED=0` still builds darwin/arm64,
+darwin/amd64, linux/amd64, linux/arm64 and windows/amd64. That gate earned itself immediately: the
+fallback referenced `modberr.CodeUnimplemented`, a code that does not exist, and it compiles only
+when cgo is off.
+
+**Neither source proves the contract alone**, which is worth stating plainly:
+
+| | D5, D6 (rescan) | D7 (delta) |
+|---|---|---|
+| `PollSource` | pass | skipped — it only rescans |
+| FSEvents | skipped — no kernel overflow to provoke | **pass** |
+
+The overflow mapping (`MustScanSubDirs`, `UserDropped`, `KernelDropped` → `RescanQueueOverflow`;
+`RootChanged` → `RescanSourceRestart`) is implemented but unprovoked, and is the least-proven part
+of this backend.
+
+**D9 exists because FSEvents exposed a leak D1–D8 could not see.** Removing the stop guard from the
+source's send loop survived every case: `Close` still returns promptly, because it never waited for
+the sender — it simply abandons the goroutine. One leak per watcher is unbounded in a desktop
+process that opens a source per worktree. D9 now opens ten sources, *provokes a change in each*, and
+closes without reading; an idle source exits cleanly either way, so a case that never provokes one
+proves nothing.
+
+**Two platform traps, both found by writing tests rather than reading documentation.** FSEvents
+reports *resolved* paths — a stream over `/var/folders/x` delivers `/private/var/folders/x` — so a
+root that is not resolved strips nothing and the source silently reports no changes. That is the
+same trap `EXE-A01b` hit with SBPL subpath rules (B-14), on the same platform. And per-path flags are
+coalesced, so a file created and deleted in one window arrives with both bits set; the source
+`Lstat`s and lets the flags hint, because trusting them is how a deleted file stays in the index
+looking live.
 
 **CTX-A01d2 — measured before proposing an engine (ADR-0102, ADR-0103)**
 

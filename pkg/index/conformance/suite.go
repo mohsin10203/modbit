@@ -29,13 +29,20 @@
 //	D6 A rescan batch carries no changes; the two are exclusive.
 //	D7 A delta batch carries at least one change.
 //	D8 Closing while a reader is blocked releases that reader.
+//	D9 Closing releases the goroutines the source started.
 //
 // D7 is Skipped for a source that only ever rescans, which `PollSource` legitimately is. Skipped is
 // not Pass: a delta path that was never exercised has not been shown to work.
+//
+// D9 exists because D4 does not imply it. A source whose sender is parked on an unbuffered channel
+// still has a `Close` that returns immediately — it simply abandons the goroutine. One leak per
+// watcher is unbounded in a desktop process that opens a source per worktree, and every other case
+// here passes while it happens.
 package conformance
 
 import (
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/modbit/modbit/pkg/index"
@@ -323,6 +330,56 @@ func Run(newSource func() index.ChangeSource, touch func(), opts Options) Report
 			fail("D8", "close releases a blocked reader",
 				"a reader ranging over the channel was still blocked %v after Close", opts.Shutdown)
 		}
+	}()
+
+	// D9 — closing releases the source's goroutines.
+	//
+	// Counted over many sources rather than one, because a single goroutine is inside the runtime's
+	// own noise and a per-source leak is not: ten sources leaking one each is unmistakable, while
+	// ten correct ones return to baseline.
+	//
+	// Each source is provoked and then closed without anyone reading, because that is the shape the
+	// leak takes: a sender holding a batch nobody wants. An idle source exits cleanly whether or not
+	// its send is guarded, so a case that never provokes one proves nothing.
+	func() {
+		const (
+			sources = 10
+			// Long enough for a provoked change to reach the source's sender and park there, since
+			// an idle source leaks nothing: its sender is waiting on stop and exits the moment Close
+			// arrives. The leak this case exists for needs a batch in flight and nobody reading.
+			park = 60 * time.Millisecond
+		)
+		runtime.GC()
+		before := runtime.NumGoroutine()
+		for range sources {
+			s := newSource()
+			_ = s.Changes() // obtained and deliberately never drained
+			if touch != nil {
+				touch()
+				time.Sleep(park)
+			}
+			if err := closeBounded(s, opts.Shutdown); err != nil {
+				fail("D9", "close releases goroutines", "%v", err)
+				return
+			}
+		}
+		// Goroutines exit asynchronously, so this polls rather than sampling once — a single
+		// reading immediately after Close would fail a correct source that simply had not been
+		// scheduled yet.
+		const tolerance = 2
+		deadline := time.Now().Add(opts.Shutdown)
+		after := runtime.NumGoroutine()
+		for time.Now().Before(deadline) && after > before+tolerance {
+			time.Sleep(10 * time.Millisecond)
+			runtime.GC()
+			after = runtime.NumGoroutine()
+		}
+		if after > before+tolerance {
+			fail("D9", "close releases goroutines",
+				"%d sources opened, provoked and closed left %d goroutines behind", sources, after-before)
+			return
+		}
+		pass("D9", "close releases goroutines")
 	}()
 
 	return report
