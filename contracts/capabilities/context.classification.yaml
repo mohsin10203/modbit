@@ -133,6 +133,11 @@ tests:
   - pkg/index:TestSymbolResultsAreIndependentOfIndexingOrder
   - pkg/index:TestExtractChangeSetIndexesUpsertsAndDropsRemovals
   - pkg/index:TestExtractChangeSetSurvivesAnUnparseableFile
+  # Snapshot integrity and manifest hygiene (CTX-A01h).
+  - pkg/index:TestSecurityExcludedPathsCannotEnterAManifest
+  - pkg/index:TestSecurityModbitStateDirectoryIsExcludedByDefault
+  - pkg/index:TestSecurityRepositoryMetadataIsNotIndexed
+  - pkg/index:TestSecuritySnapshotCorruptionIsDetected
   # Outstanding for the rest of CTX-A01: native change sources per platform (CTX-A01c3-c5), a native
   # lexical engine (CTX-A01d2), pgvector behind the vector port (CTX-A01f2), and a tree-sitter
   # extractor for the remaining languages (CTX-A01e2).

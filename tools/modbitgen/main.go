@@ -87,7 +87,25 @@ func run(contractsDir, rootDir, checkOnly string, freezeErrors bool) error {
 	case "errors-freeze":
 		return errCatalog.checkFreeze(lockPath)
 	case "capabilities":
-		fmt.Printf("capability-check: %d capabilities: ok\n", len(capCatalog.Capabilities))
+		// R-TST-01: a capability that cites evidence must cite evidence that exists. Without this
+		// the registry reports coverage it cannot support the moment a test is renamed.
+		if err := verifyCapabilityEvidence(capCatalog, rootDir); err != nil {
+			return err
+		}
+		orphans, err := orphanedSecurityTests(capCatalog, rootDir)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("capability-check: %d capabilities, %d cited tests verified: ok\n",
+			len(capCatalog.Capabilities), countCitedTests(capCatalog))
+		if len(orphans) > 0 {
+			// Reported, not fatal: a security test may belong to a capability not yet registered,
+			// and failing the build for that would push authors toward not writing the test.
+			fmt.Printf("capability-check: %d security tests are not cited by any capability:\n", len(orphans))
+			for _, orphan := range orphans {
+				fmt.Printf("  %s\n", orphan)
+			}
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown -check family %q", checkOnly)

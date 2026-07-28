@@ -1,0 +1,58 @@
+# Capability: execution sandbox backend contract.
+#
+# SBX-1 requires native process isolation, containers, and microVMs to implement one versioned
+# contract. SBX-3 is why the contract is shaped the way it is: a backend must not report a policy as
+# enforced when it is advisory, so enforcement is a declared per-control level rather than something
+# a caller infers from a boolean.
+
+id: execution.sandbox
+version: 1
+owner: execution
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§13-EXE-4
+  - PRD-v5.1-§13-EXE-5
+  - PRD-v5.1-§13-EXE-6
+  - PRD-v5.1-§13-EXE-7
+  - PRD-v5.1-§13-EXE-9
+  - PRD-v5.1-§13-SBX-1
+  - PRD-v5.1-§13-SBX-3
+  - PRD-v5.1-§13-SBX-4
+  - PRD-v5.1-§13-SBX-5
+  - PRD-v5.1-§13-SBX-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: equivalent
+  extension: equivalent
+
+events:
+  - run.step.started
+  - run.step.completed
+  - run.step.failed
+
+settings:
+  - execution.sandbox.enabled
+  - execution.sandbox.fail_closed
+  - execution.sandbox.min_isolation
+  - execution.limits.wall_time_seconds
+
+tests:
+  - pkg/sandbox:TestSecurityUnsupportedIsTheZeroEnforcement
+  - pkg/sandbox:TestSecurityProcessBackendDoesNotOverclaim
+  - pkg/sandbox:TestSecurityARequiredControlFailsClosed
+  - pkg/sandbox:TestSecurityDegradedIsolationRequiresARecordedRationale
+  - pkg/sandbox:TestAContractVersionMismatchIsRefused
+  - pkg/sandbox:TestSecurityAProfileCanRequireAMinimumStrength
+  - pkg/sandbox:TestSecurityWorkingDirectoryCannotEscapeTheWorkspace
+  - pkg/sandbox:TestSecurityHooksAreSuppressed
+  - pkg/sandbox:TestCancellationStopsACommandAndReportsIt
+  - pkg/sandbox:TestSecurityCleanupRemovesOnlyWhatItCreated
+  - pkg/sandbox:TestSuiteCoversEverySBX5Area
+  - pkg/sandbox:TestSecurityAnUnexercisedClaimBlocksReadiness
+  - pkg/sandbox:TestValidateSpecRefusesAMalformedSpec
+  - conformance/execution-sandbox

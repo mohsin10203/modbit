@@ -31,4 +31,6 @@ settings:
 tests:
   - pkg/taint:TestDeclassifyRequiresAccountabilityAndLowersRisk
   - conformance/taint-declassification
+  - pkg/policy:TestSecurityKnownSecretCannotReachAnExternalSink
+  - pkg/policy:TestSecurityTaintBypassAttemptsAreRefused
   - security/taint-declassification-authorization

@@ -551,7 +551,43 @@ each invariant was broken in turn and the named test failed.
 | B-9 | `IgnoreFileNames` was a **map**, so the order the three ignore files applied in was random | Resolution is last-match-wins, so map iteration order decided which file won when two disagreed — a repository could get different indexing decisions on consecutive runs. | Replaced by the ordered `IgnoreFiles` slice; the order is now documented as contract. |
 | B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
-| QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | ⬜ Proposed |
+| QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | 🚧 In Progress — capability-evidence gate Qualified (QA-A01a); event conformance, performance gates, and benchmark smoke outstanding |
+
+### QA-A01 breakdown
+
+| ID | Task | Requirements | Status | Evidence |
+|---|---|---|---|---|
+| QA-A01a | Capability-evidence gate — every cited test must exist; orphaned security tests reported | R-TST-01, R-TST-05 | ✅ Qualified | `tools/modbitgen/evidence.go`; 193 cited tests verified, 0 orphans |
+| QA-A01b | Client/API event conformance | R-EVT-01..08 | ⬜ Ready | |
+| QA-A01c | Performance gates and benchmark smoke | PRD §7 | ⬜ Ready | `test-benchmark-smoke` exists but asserts no thresholds |
+
+**QA-A01a — the registry could lie about its own evidence**
+
+The Capability Registry already required every capability to cite tests. It did **not** check that
+the cited tests exist. A renamed or deleted test left the capability citing evidence that was not
+there, and the registry went on reporting the capability as covered — an assertion without evidence
+wearing the costume of a control, which is the one failure mode this registry exists to prevent.
+
+The gate parses every `_test.go` with `go/parser` (never `go/build` or `go/importer`, which shell
+out — the same CTX-12 reasoning that constrains the symbol extractor) and resolves every
+`package:TestName` reference. Non-Go references must match a declared external form, so a typo
+cannot pass as an external suite.
+
+**What it found immediately**, all of it real:
+
+- **Two shipped capabilities had no registry entry at all** — `pkg/agent` (AGT-A01, 4 sub-items) and
+  `pkg/sandbox` (EXE-A01a). Both are now registered as `agent.run` and `execution.sandbox`.
+- **Four `pkg/index` security tests from CTX-A01h were never cited**, including snapshot corruption
+  detection and manifest exclusion. Added.
+- **Two `pkg/policy` taint tests were uncited.** Added.
+
+Verified in three directions: a renamed test fails, a deleted test fails, and a typo'd external form
+fails. Registry now stands at 7 capabilities, 193 cited tests, 0 orphaned security tests.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 173 | Missing cited evidence is **fatal**; an orphaned security test is **reported** | A capability citing a test that does not exist is claiming coverage it cannot support, and that must break the build. An uncited `TestSecurity...` is a weaker signal — it may belong to a capability not yet registered — and failing the build for it would push authors toward not writing the test, which is the opposite of what the report is for. |
+| 174 | External evidence forms are an **allowlist**, not a fallback | Treating "anything without a colon" as an external suite would let `pkg/agnet:TestFoo` pass as one. Only `conformance/` and `security/` are declared, so a typo is caught rather than absorbed. |
 
 ### EXE-A01 breakdown
 

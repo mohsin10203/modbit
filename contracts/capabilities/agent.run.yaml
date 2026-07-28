@@ -1,0 +1,97 @@
+# Capability: local agent run.
+#
+# PRD §11.1 specifies a durable workflow graph rather than an unbounded chat loop. That is the whole
+# capability: a chat loop has no phase to checkpoint, no transition to emit, and no bound to exhaust,
+# so none of RUN-1 through RUN-6 can be stated about it, let alone enforced.
+
+id: agent.run
+version: 1
+owner: agent-platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§11.1-RUN-1
+  - PRD-v5.1-§11.1-RUN-2
+  - PRD-v5.1-§11.1-RUN-3
+  - PRD-v5.1-§11.1-RUN-4
+  - PRD-v5.1-§11.1-RUN-5
+  - PRD-v5.1-§11.1-RUN-6
+  - PRD-v5.1-§11.4-STR-1
+  - PRD-v5.1-§11.4-STR-3
+  - PRD-v5.1-§11.4-STR-6
+  - PRD-v5.1-§11.4-STR-7
+  - PRD-v5.1-§8.6-VER-1
+  - PRD-v5.1-§8.6-VER-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events:
+  - run.created
+  - run.phase.changed
+  - run.checkpoint.created
+  - run.resumed
+  - run.completed
+  - run.failed
+  - run.cancelled
+  - run.halted
+  - run.message.queued
+  - run.message.incorporated
+  - run.message.superseded
+  - run.message.rejected
+  - run.message.reordered
+  - run.interrupted
+
+settings:
+  - agent.default_mode
+  - agent.retry_limit
+  - agent.tools.allowed
+  - agent.tools.denied
+
+tests:
+  # Run state machine (AGT-A01a).
+  - pkg/agent:TestEveryTransitionIsRecorded
+  - pkg/agent:TestEventSequenceIsMonotonic
+  - pkg/agent:TestARunHaltsOnceForOneClosedReason
+  - pkg/agent:TestSecurityAskModeCanNeverExecute
+  - pkg/agent:TestPlanModeStopsBeforeAuthorization
+  - pkg/agent:TestLoopsAreBoundedAndExhaustionHalts
+  - pkg/agent:TestOnlyDeclaredLoopBacksAreAllowed
+  - pkg/agent:TestSecurityAuthorizationCannotBeSkipped
+  - pkg/agent:TestEveryPhaseProducesACheckpoint
+  - pkg/agent:TestSecurityResumeIsRefusedAfterDrift
+  - pkg/agent:TestSecurityResumeCannotResetTheLoopBudget
+  - pkg/agent:TestAHaltRecordsWhereItInterruptedTheRun
+  - pkg/agent:TestHaltReasonsMapToDistinctEvents
+  # Steering queue (AGT-A01c).
+  - pkg/agent:TestQueueOrderIsStableAcrossReads
+  - pkg/agent:TestOnlyPendingMessagesCanChangeState
+  - pkg/agent:TestSecuritySteeringNeverLandsMidExecution
+  - pkg/agent:TestInterruptIsDistinctAndRecordsWhatItStopped
+  - pkg/agent:TestReorderingUsesOptimisticConcurrency
+  - pkg/agent:TestSecurityPostAuthorizationSteeringIsSurfacedNotApplied
+  - pkg/agent:TestSecurityMessageProvenanceIsCarried
+  - pkg/agent:TestEveryStateChangeIsRecorded
+  # Typed tool registry (AGT-A01b).
+  - pkg/agent:TestSecurityToolsMustDeclareASideEffectClass
+  - pkg/agent:TestInputIsValidatedBeforePolicyIsEvaluated
+  - pkg/agent:TestValidatorRefusesConstructsItCannotEnforce
+  - pkg/agent:TestSecurityUndeclaredPropertiesAreRefused
+  - pkg/agent:TestSecurityToolsCannotReceiveCredentials
+  - pkg/agent:TestEveryCallProducesEvidence
+  - pkg/agent:TestToolErrorsAreStructuredValues
+  - pkg/agent:TestSecurityToolOutputIsAlwaysAtLeastToolResult
+  - pkg/agent:TestOversizedOutputIsTruncatedWithAHandle
+  - pkg/agent:TestSecurityADeniedDecisionNeverReachesTheTool
+  # Completion contract (AGT-A01d).
+  - pkg/agent:TestSecurityTheZeroVerifierStatusIsNotAPass
+  - pkg/agent:TestSecurityNotRunAndInconclusiveNeverComplete
+  - pkg/agent:TestCompletionRequiresEveryRequiredCheck
+  - pkg/agent:TestEvidenceRecordsEverythingVER2Requires
+  - pkg/agent:TestFailureAndGapAreDistinctOutcomes
+  - pkg/agent:TestSecurityStaleEvidenceDoesNotSatisfyACheck
