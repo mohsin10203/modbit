@@ -86,12 +86,23 @@ Neither alone covers the contract, and saying so is more useful than a green tic
 | | D5, D6 (rescan) | D7 (delta) |
 |---|---|---|
 | `PollSource` | **pass** | skipped — it only rescans |
-| FSEvents | skipped — no kernel overflow to provoke on demand | **pass** |
+| FSEvents | skipped *in the suite* — covered directly instead, below | **pass** |
 
 FSEvents maps `kFSEventStreamEventFlagMustScanSubDirs`, `UserDropped` and `KernelDropped` onto
-`RescanQueueOverflow`, and `RootChanged` onto `RescanSourceRestart`. Those paths are implemented and
-unit-reachable but not provoked by the suite, because forcing a kernel queue overflow on demand is
-not something a test can do reliably. **They are the least-proven part of this backend.**
+`RescanQueueOverflow`, and `RootChanged` onto `RescanSourceRestart`.
+
+This ADR first recorded those as the least-proven part of the backend, on the grounds that a kernel
+queue overflow cannot be provoked on demand. That was half right. The *kernel's* `MustScanSubDirs`
+still cannot be forced — but the source's own bounded queue can, and both arrive at the same place:
+a `RescanQueueOverflow` batch carrying no changes. A burst of 6,000 writes against a queue depth of
+4,096, with the consumer deliberately not reading, provokes it reliably — verified over ten
+consecutive runs under the race detector.
+
+That is not an artificial consumer, either. A reindexer busy walking a tree is exactly what stops
+reading, and exactly when a burst is most likely.
+
+So the overflow *contract* — loss is reported, never dropped — is now proven for this source, and
+only the kernel's own flag path remains unexercised. `RootChanged` is still unprovoked.
 
 ## Two things the platform got wrong for free
 
@@ -122,9 +133,9 @@ recorded because the next backend author will meet them.
 
 ## Not measured
 
-- **Behaviour under kernel queue overflow.** The mapping is implemented; provoking it is not
-  something the suite can do on demand. A soak test that generates changes faster than the stream
-  drains would settle it, and is the obvious follow-up.
+- **The kernel's own `MustScanSubDirs`, and `RootChanged`.** The source's queue overflow is now
+  covered by a test; these two remain reachable only by outrunning the kernel or by moving the
+  watched root out from under a live stream. Both are implemented and neither is exercised.
 - **A large real repository.** Latency was measured on a small synthetic tree. FSEvents costs no
   per-file descriptor, so there is no reason to expect it to degrade with file count, but that is
   an argument rather than a measurement.

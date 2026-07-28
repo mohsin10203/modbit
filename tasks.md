@@ -451,9 +451,16 @@ when cgo is off.
 | `PollSource` | pass | skipped — it only rescans |
 | FSEvents | skipped — no kernel overflow to provoke | **pass** |
 
-The overflow mapping (`MustScanSubDirs`, `UserDropped`, `KernelDropped` → `RescanQueueOverflow`;
-`RootChanged` → `RescanSourceRestart`) is implemented but unprovoked, and is the least-proven part
-of this backend.
+ADR-0104 first recorded the overflow mapping as unprovable on demand. That was half right: the
+kernel's own `MustScanSubDirs` still cannot be forced, but **the source's bounded queue can**, and
+both land on the same `RescanQueueOverflow` batch. A burst of 6,000 writes against a queue depth of
+4,096, with nothing reading, provokes it reliably — ten consecutive runs under the race detector. The
+non-reading consumer is not artificial: a reindexer busy walking a tree is exactly what stops
+reading, and exactly when a burst is most likely.
+
+So the property that matters — **loss is reported as a rescan, never dropped** — is now proven for
+this source. A watcher that silently drops changes leaves the index confidently wrong, which is worse
+than one that stops. Only the kernel's own flag path and `RootChanged` remain unexercised.
 
 **D9 exists because FSEvents exposed a leak D1–D8 could not see.** Removing the stop guard from the
 source's send loop survived every case: `Close` still returns promptly, because it never waited for

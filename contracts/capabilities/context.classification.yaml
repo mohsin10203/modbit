@@ -102,6 +102,9 @@ tests:
   - pkg/index/fsevents:TestAWriteIsReportedRelativeToTheWatchedRoot
   - pkg/index/fsevents:TestADeletedFileIsReportedAsRemoved
   - pkg/index/fsevents:TestSecurityAnUnwatchableRootIsRefused
+  # The overflow path the suite leaves Skipped for this source: loss must be reported as a rescan,
+  # never dropped, or the index is left confidently wrong.
+  - pkg/index/fsevents:TestABurstThatOutrunsTheSourceBecomesARescan
   # Lexical channel (CTX-A01d).
   - pkg/index:TestSecurityLexicalResultsNeverCrossRevisions
   - pkg/index:TestSecurityOnlyIndexableContentCanBeChunked
