@@ -173,6 +173,70 @@ func orphanedSecurityTests(catalog *capabilityCatalog, root string) ([]string, e
 	return orphans, nil
 }
 
+// infrastructurePackages are tested packages that deliberately belong to no capability.
+//
+// The registry maps *product* capabilities to evidence, and ADR-0100 forbids inventing capability
+// scope that the PRD does not define. These are cross-cutting infrastructure every capability stands
+// on rather than capabilities in their own right, so an entry here is a decision, not an exemption — and listing them explicitly is what lets a *newly* unclaimed package be visible.
+//
+// Each needs a reason, because "add it to the allowlist" is how this check would otherwise be
+// silenced one package at a time.
+var infrastructurePackages = map[string]string{
+	"pkg/id":      "typed identifiers; their prefix rules are asserted wherever a capability uses them",
+	"pkg/modberr": "the error contract, frozen separately by errors-freeze and catalog.lock",
+}
+
+// unclaimedPackages returns packages that contain tests but that no capability cites at all.
+//
+// This is a different question from an uncited test, and a much sharper one. Roughly half the
+// repository's tests are cited by nothing, and that is mostly fine — a unit test for an internal
+// helper is not evidence for a product capability, and requiring a citation for each would dilute
+// the registry into a second copy of the test list.
+//
+// A whole tested package that no capability claims is another matter: it means a body of behaviour
+// exists that the registry cannot see. `pkg/event` sat in exactly that state — seventeen tests, no
+// capability, and the orphan check silent because none of them were named `TestSecurity...`.
+//
+// Reported rather than fatal, for the same reason the security orphan check is.
+func unclaimedPackages(catalog *capabilityCatalog, root string) ([]string, error) {
+	index, err := indexTestFunctions(root)
+	if err != nil {
+		return nil, err
+	}
+	claimed := make(map[string]struct{})
+	for _, cap := range catalog.Capabilities {
+		for _, ref := range cap.Tests {
+			if pkg, _, ok := strings.Cut(strings.TrimSpace(ref), ":"); ok {
+				claimed[pkg] = struct{}{}
+			}
+		}
+	}
+
+	var unclaimed []string
+	for pkg, tests := range index {
+		if len(tests) == 0 {
+			continue
+		}
+		if _, ok := claimed[pkg]; ok {
+			continue
+		}
+		if _, ok := infrastructurePackages[pkg]; ok {
+			continue
+		}
+		unclaimed = append(unclaimed, fmt.Sprintf("%s (%s)", pkg, plural(len(tests), "test")))
+	}
+	sort.Strings(unclaimed)
+	return unclaimed, nil
+}
+
+// plural renders a count with a correctly inflected noun.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // countCitedTests counts the Go test references across the registry, for the check's summary line.
 func countCitedTests(catalog *capabilityCatalog) int {
 	n := 0

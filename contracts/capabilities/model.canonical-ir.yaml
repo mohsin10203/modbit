@@ -52,3 +52,19 @@ tests:
   # classification, errors, usage accounting, prompt caching, revision capture, and content types.
   # No adapter may be marked production ready until it passes (ADP-6). Tracked as MOD-A01 in tasks.md.
   - conformance/model-adapter
+  # The external reference above says a suite exists. These say it works — that it covers every
+  # ADP-5 area, that it detects each contract violation rather than certifying whatever it is given,
+  # and that its report carries no upstream content. A qualification gate nobody has shown can fail
+  # is a gate that passes everything, so the suite's own evidence is part of this capability's.
+  - pkg/inference/conformance:TestSuiteCoversEveryADP5Area
+  - pkg/inference/conformance:TestConformantAdapterIsProductionReady
+  - pkg/inference/conformance:TestSuiteDetectsEachContractViolation
+  - pkg/inference/conformance:TestSuiteDetectsSuppressedLossDeclaration
+  - pkg/inference/conformance:TestSuiteDetectsStreamTerminalContractViolations
+  - pkg/inference/conformance:TestSuiteSurvivesATotallyBrokenAdapter
+  - pkg/inference/conformance:TestUndeclaredCapabilitiesAreSkippedNotFailed
+  - pkg/inference/conformance:TestUnexercisedDeclaredPathIsInconclusiveAndBlocksReadiness
+  - pkg/inference/conformance:TestCancellationOnAnAlreadyCompletedStreamIsInconclusive
+  - pkg/inference/conformance:TestStreamTerminalContractSkippedWithoutStreamingSupport
+  - pkg/inference/conformance:TestReportIsSerializableEvidence
+  - pkg/inference/conformance:TestReportDetailsCarryNoUpstreamContent

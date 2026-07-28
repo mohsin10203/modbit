@@ -101,9 +101,22 @@ func run(contractsDir, rootDir, checkOnly string, freezeErrors bool) error {
 		if len(orphans) > 0 {
 			// Reported, not fatal: a security test may belong to a capability not yet registered,
 			// and failing the build for that would push authors toward not writing the test.
-			fmt.Printf("capability-check: %d security tests are not cited by any capability:\n", len(orphans))
+			fmt.Printf("capability-check: %s not cited by any capability:\n", plural(len(orphans), "security test"))
 			for _, orphan := range orphans {
 				fmt.Printf("  %s\n", orphan)
+			}
+		}
+		unclaimed, err := unclaimedPackages(capCatalog, rootDir)
+		if err != nil {
+			return err
+		}
+		if len(unclaimed) > 0 {
+			// A tested package no capability claims is behaviour the registry cannot see at all —
+			// the state pkg/event was in, invisible because none of its tests were named
+			// TestSecurity. Reported for the same reason as the orphan list above.
+			fmt.Printf("capability-check: %s claimed by no capability:\n", plural(len(unclaimed), "tested package"))
+			for _, pkg := range unclaimed {
+				fmt.Printf("  %s\n", pkg)
 			}
 		}
 		return nil

@@ -840,11 +840,46 @@ cannot pass as an external suite.
 - **Two `pkg/policy` taint tests were uncited.** Added.
 
 Verified in three directions: a renamed test fails, a deleted test fails, and a typo'd external form
-fails. Registry now stands at 7 capabilities, 193 cited tests, 0 orphaned security tests.
+fails.
+
+**QA-A01a-2 — the gate had a blind spot, and no tests of its own**
+
+Registering `run.event_log` during QA-A01b pulled in 17 event tests that were cited by nothing. The
+orphan check had been silent about them: it reports uncited `TestSecurity...` tests, and none of
+`pkg/event`'s were named that way. A whole tested package can therefore be invisible to the registry.
+
+Measured across the repository: **224 of 473 test functions (47%) are cited by nothing.** That is
+mostly fine and deliberately left alone — a unit test for an internal helper is not evidence for a
+product capability, and requiring a citation for each would dilute the registry into a second copy of
+the test list. The sharp signal is a different one: a *package* that no capability claims at all.
+Three had none.
+
+| package | tests | resolution |
+|---|---|---|
+| `pkg/inference/conformance` | 12 | **Now cited by `model.canonical-ir`.** ADP-6 says no adapter ships until this suite passes, and the capability cited only the external `conformance/model-adapter` marker — "a suite exists", not "the suite has been shown to detect violations". Its own tests are what prove that. |
+| `pkg/id` | 9 | Allowlisted infrastructure |
+| `pkg/modberr` | 16 | Allowlisted infrastructure |
+
+The allowlist is the pressure valve that keeps the check honest: without it the only way to silence a
+permanently-unclaimed infrastructure package would be to invent a product capability for it, which
+ADR-0100 forbids — or to delete the check. Each entry carries a reason, and a test asserts that,
+because "add it to the allowlist" is otherwise how this gets silenced one package at a time.
+
+**The evidence gate itself had no tests.** The check every other capability's coverage claim rests on
+had never been shown to fail. Six now cover it: missing evidence is fatal, a misspelled external
+prefix is refused, an orphaned security test is reported, an unclaimed package is reported with its
+test count, an allowlisted package stays quiet, and a package with no tests is not reported at all.
+They are deliberately *not* cited by any capability — `tools/modbitgen` is already claimed, and a
+meta-capability asserting "the registry works" would be a category error, since the registry maps
+product capabilities to evidence.
+
+Registry now stands at 9 capabilities, 261 cited tests, 0 orphaned security tests, 0 unclaimed
+packages.
 
 | # | Decision | Rationale |
 |---|---|---|
 | 173 | Missing cited evidence is **fatal**; an orphaned security test is **reported** | A capability citing a test that does not exist is claiming coverage it cannot support, and that must break the build. An uncited `TestSecurity...` is a weaker signal — it may belong to a capability not yet registered — and failing the build for it would push authors toward not writing the test, which is the opposite of what the report is for. |
+| 175 | The unclaimed-package check reports **packages**, not uncited tests | Half the repository's tests are cited by nothing and that is correct; flagging each would produce 224 lines nobody reads and would push authors to cite everything, which turns the registry into a duplicate test list. A tested package no capability claims is a much rarer and much sharper signal — it is behaviour the registry cannot see, and it is the state `pkg/event` was in. |
 | 174 | External evidence forms are an **allowlist**, not a fallback | Treating "anything without a colon" as an external suite would let `pkg/agnet:TestFoo` pass as one. Only `conformance/` and `security/` are declared, so a typo is caught rather than absorbed. |
 
 ### EXE-A01 breakdown
