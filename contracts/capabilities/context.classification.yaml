@@ -105,6 +105,13 @@ tests:
   # The overflow path the suite leaves Skipped for this source: loss must be reported as a rescan,
   # never dropped, or the index is left confidently wrong.
   - pkg/index/fsevents:TestABurstThatOutrunsTheSourceBecomesARescan
+  # The composed pipeline: write -> walk -> classify -> reindex -> index -> search -> cite.
+  # Every stage above has its own tests; these assert the promise the stages exist to deliver.
+  - pkg/index:TestAFileOnDiskBecomesACitation
+  - pkg/index:TestSecurityADeletedFileLeavesBothTheIndexAndTheManifest
+  - pkg/index:TestSecurityExcludedContentNeverReachesARetrievalResult
+  - pkg/index:TestAnEditBecomesSearchableThroughARunningWatcher
+  - pkg/index:TestSecurityEveryLexicalResultIsCitable
   # Lexical channel (CTX-A01d).
   - pkg/index:TestSecurityLexicalResultsNeverCrossRevisions
   - pkg/index:TestSecurityOnlyIndexableContentCanBeChunked

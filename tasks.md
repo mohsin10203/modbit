@@ -421,6 +421,35 @@ before D4 ran. In CI that is a timeout with no attribution, which is worse than 
 Every `Close` the suite performs is now bounded, so a blocking `Close` is reported by D2, D3 and D4
 together instead of hanging the run.
 
+**CTX-A01 pipeline tests — the seams, and what they did not find**
+
+Every stage of the local context path had tests; the **seams between them** had none. The existing
+end-to-end test stops at the `ChangeSet`, and nothing asserted that a file written on disk becomes
+searchable *and* citable. A pipeline can be assembled from correct components and still miss CTX-2 —
+a change observed but never indexed, or indexed but not citable, fails the promise while every unit
+test passes.
+
+Five tests now cover `write → walk → classify → reindex → ChangeSet → index → search → cite`,
+including the composed security properties: a deleted file leaves both the index and the manifest, and
+protected content never reaches a retrieval result however it is queried. The excluded-path case also
+checks that a protected path is refused **in the same words** an absent one gets, since a different
+message is an existence oracle for the secrets a repository holds.
+
+**They did not find a bug, and three mutation attempts say why.** Dropping removals from
+`ApplyChangeSet` is caught. Indexing non-indexable entries is *not* caught here — the reindexer
+filters them earlier, so `ApplyChangeSet`'s guard is defence in depth this path never exercises. And
+emitting removals with a `./` prefix is neutralised by `normalizePath`. **The composition is better
+defended than assumed**, and no mutation was found that only these tests catch.
+
+So their value is regression protection for a promise nothing previously stated, not a bug found
+today — and that is worth recording plainly rather than presenting five green tests as a discovery.
+
+Two fixture errors are worth carrying forward, both mine. `UniqueDoomedSymbol` and `UniqueKeptSymbol`
+share the token `unique` after identifier splitting, so every query matched both and a correct
+deletion looked incomplete; the fixtures now use disjoint vocabulary. And `NewSnapshot` *rejects*
+excluded entries rather than filtering them, so a caller must drop them deliberately — a protected
+path reaching a manifest is a caller error, not something to tidy up silently.
+
 **CTX-A01c3 — the kqueue ceiling, measured (ADR-0104)**
 
 The reason for rejecting a portable watcher library was previously asserted. It is now measured:
