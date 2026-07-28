@@ -1,0 +1,58 @@
+# Capability: Settings Registry and local settings files.
+#
+# PRD §20A. One of the authored settings documents travels with the repository, and that single fact
+# shapes the capability: a committed settings file is content a contributor chose, which makes it
+# untrusted input (TNT-1) the product reads and acts on. The resolver refuses a lower scope weakening
+# a higher-scope security setting; the loader makes sure a file can never be *presented* as a scope it
+# did not come from.
+
+id: settings.registry
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§20A.3-SET-1
+  - PRD-v5.1-§20A.3-SET-2
+  - PRD-v5.1-§20A.4-SET-3
+  - PRD-v5.1-§20A.5-SET-6
+  - PRD-v5.1-§20A.10-settings-files
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events:
+  - settings.changed
+  - settings.snapshot.created
+
+settings:
+  - context.indexing.max_file_bytes
+  - agent.retry_limit
+
+tests:
+  # Scope resolution and merge semantics (FND-06).
+  - pkg/settings:TestSourceMapExplainsEveryContribution
+  - pkg/settings:TestChangeEffectIsReported
+  - pkg/settings:TestLowerScopeCannotWeakenHigherScope
+  - pkg/settings:TestPolicyLockOverridesEveryPreference
+  - pkg/settings:TestPolicyCeilingClampsAPermissivePreference
+  - pkg/settings:TestNonPolicyScopeCannotPublishConstraints
+  - pkg/settings:TestUnknownKeysArePreservedAndReported
+  - pkg/settings:TestRegistryRejectsIncompatibleMergeAndType
+  - pkg/settings:TestCustomMergerFailureIsDiagnosed
+  - pkg/settings:TestClampDiagnosticsNameTheResponsibleScope
+  # Local settings files (SET-A01b).
+  - pkg/settings:TestSecurityALocalFileCanNeverAuthorAPolicyScope
+  - pkg/settings:TestSecurityAFileCannotDeclareItsOwnScope
+  - pkg/settings:TestMalformedAndOversizedFilesAreDiagnosedNotIgnored
+  - pkg/settings:TestUnknownKeysInAFileArePreservedAndReported
+  - pkg/settings:TestSecuritySymlinkedSettingsFilesAreNotFollowed
+  - pkg/settings:TestSecurityAFileCannotAuthorASettingItsScopeForbids
+  - pkg/settings:TestDiscoveryOrderIsDeterministic
+  - pkg/settings:TestAMissingFileIsAnOrdinaryOutcome
+  - pkg/settings:TestLoadedLayersResolveThroughTheRegistry

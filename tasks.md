@@ -232,7 +232,7 @@ PRD §6.1. Docket §3.
 |---|---|---|
 | IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
-| SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | 🚧 In Progress — resolver, generation, and validation done (FND-06/07); local files, UI metadata, and sync outstanding |
+| SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | 🚧 In Progress — resolver, generation, validation (FND-06/07) and local files (SET-A01b) done; UI metadata outstanding, sync is SET-C01 |
 | CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**; what remains is six native backends behind ports that already exist and are tested (`c3`–`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
@@ -552,6 +552,46 @@ each invariant was broken in turn and the named test failed.
 | B-10 | Classification cost ~90µs and **146 allocations per file** | The walker made this matter: a 100k-file repository spent ~9s and ~680 MB of churn on path matching alone, against CTX-2's freshness SLO. `BenchmarkClassify` had recorded the number since CTX-A01a, but nothing had read it. | Two changes, both behaviour-preserving. `RuleSet.Match` splits the path once and slices it for each ancestor instead of re-splitting per pattern per ancestor. Pattern segments are classified at parse time, so literals compare with `==` and `*.ext` globs with `HasSuffix`; only segments carrying a real metacharacter reach `path.Match`, which the profile showed was 58% of the time. Now ~16µs and 3 allocations — 5.6× faster, 49× fewer allocations, with `TestGlobFormsAgreeWithGlobSemantics` pinning all three branches against `path.Match`. |
 
 | QA-A01 | Foundation qualification — Capability Registry, client/API event conformance, secret tests, performance gates, benchmark smoke | 🚧 In Progress — capability-evidence gate Qualified (QA-A01a); event conformance, performance gates, and benchmark smoke outstanding |
+
+### SET-A01 breakdown
+
+| ID | Task | Requirements | Status | Evidence |
+|---|---|---|---|---|
+| SET-A01a | Registry, scope resolver, merge strategies, validation | SET-1..SET-7 | ✅ Qualified | delivered as FND-06/07 |
+| SET-A01b | Local settings files — discovery, scope binding, diagnostics | §20A.10, SET-2 | ✅ Qualified | `pkg/settings/files.go`, 9 tests; F1–F8 mutation-verified |
+| SET-A01c | UI metadata on definitions — label, group, order, widget | §20A.6 | ⬜ Ready | Touches the contract schema and all 54 definitions |
+
+**SET-A01b local settings files (F1–F8)**
+
+One authored settings document travels with the repository, and that single fact shapes the whole
+design: a committed settings file is content a contributor chose, which makes it untrusted input
+(TNT-1) that the product reads and acts on. The resolver already refuses a lower scope weakening a
+higher-scope security setting; the loader's job is to make sure a file can never be *presented* as a
+scope it did not come from.
+
+| # | Invariant |
+|---|---|
+| F1 | A file's scope comes from its location, never from its contents |
+| F2 | A repository-committed file can never author a policy scope |
+| F3 | An unreadable, oversized, or malformed file is a diagnostic, never a silent default |
+| F4 | Unknown keys are preserved and reported |
+| F5 | Files are read only from declared locations; a symlink out is refused |
+| F6 | A file may only author settings whose definition permits that scope |
+| F7 | Discovery order and diagnostic order are deterministic |
+| F8 | A missing file is an ordinary outcome, not an error |
+
+All eight are mutation-verified. F7 took two rounds: the first test checked *file source* order, which
+comes from a static slice and would be stable with no sorting at all, so it could not catch an
+unsorted key walk. The added assertion loads a multi-key file twenty times and requires the
+diagnostics to be sorted and identical.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 175 | The scope is checked against a **closed set** before the file is read | Policy scopes are absent from `fileScopes`, and that absence is the control. A repository able to author `product_safety` or `enterprise_policy` would be publishing its own constraint envelope — the inversion the scope hierarchy exists to prevent, and one the resolver alone cannot stop because it trusts the scope the layer declares. |
+| 176 | A malformed file contributes nothing and says so **loudly** | Falling back to defaults silently would leave a user believing their configuration is in force when it is not. For a security setting that is the worst available outcome, so the diagnostic is an error rather than a warning. |
+| 177 | A symlinked settings file is not followed | A repository can commit a link, and following one would read a file the repository chose from somewhere the layout never declared — the same reasoning as CTX-A01b decision 52 for the indexer. |
+| 178 | Layout paths are joined to a resolved root, never taken from a document | No value inside a settings file can redirect the loader at another path. |
+| 179 | Discovery order is a slice, not a map | It decides which file wins when two author the same key at one scope, and a map would make that vary per run — the same defect as B-9 in the index ignore files. |
 
 ### QA-A01 breakdown
 
