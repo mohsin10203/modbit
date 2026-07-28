@@ -185,6 +185,10 @@ type Definition struct {
 	SecurityClass    SecurityClass
 	Description      string
 	Deprecated       bool
+	// UI is presentation metadata, generated from the same contract as everything else. §20A.6
+	// requires a surface to render every key without hardcoding a list, and a hardcoded list is one
+	// that silently omits the setting added last week.
+	UI UI
 }
 
 // AllowsScope reports whether this setting may be authored at s.

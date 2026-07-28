@@ -195,6 +195,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectImmediate,
 		SecurityClass:    SecurityHigh,
 		Description:      "How long a granted approval may be reused before it must be requested again.",
+		UI:               UI{Label: "Duration", Group: "approval", Order: 11, Widget: WidgetSelect},
 	},
 	{
 		Key:           "agent.approval.expiration_seconds",
@@ -209,6 +210,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectImmediate,
 		SecurityClass: SecurityHigh,
 		Description:   "Lifetime of a pending approval request before it expires (SFX-3).",
+		UI:            UI{Label: "Expiration seconds", Group: "approval", Order: 13, Widget: WidgetNumber},
 	},
 	{
 		Key:              "agent.approval.two_person_threshold",
@@ -223,6 +225,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextToolCall,
 		SecurityClass:    SecurityCritical,
 		Description:      "Lowest side-effect class that requires two distinct human approvers.",
+		UI:               UI{Label: "Two person threshold", Group: "approval", Order: 12, Widget: WidgetSelect},
 	},
 	{
 		Key:           "agent.auto_create_worktree",
@@ -235,6 +238,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityLow,
 		Description:   "Create an isolated git worktree for each Code run.",
+		UI:            UI{Label: "Auto create worktree", Group: "agent", Order: 8, Widget: WidgetToggle},
 	},
 	{
 		Key:              "agent.auto_verify_before_completion",
@@ -248,6 +252,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityHigh,
 		Description:      "Require the Verify workflow to pass before a run may report completion.",
+		UI:               UI{Label: "Auto verify before completion", Group: "agent", Order: 7, Widget: WidgetToggle},
 	},
 	{
 		Key:           "agent.default_mode",
@@ -261,6 +266,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityLow,
 		Description:   "Workflow mode a new session starts in.",
+		UI:            UI{Label: "Default mode", Group: "agent", Order: 1, Widget: WidgetSelect},
 	},
 	{
 		Key:           "agent.default_profile",
@@ -273,6 +279,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityMedium,
 		Description:   "Agent Profile id applied when a run does not name one.",
+		UI:            UI{Label: "Default profile", Group: "agent", Order: 2, Widget: WidgetText},
 	},
 	{
 		Key:              "agent.execution.mode",
@@ -287,6 +294,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextToolCall,
 		SecurityClass:    SecurityHigh,
 		Description:      "Controls when agent tool calls require approval.",
+		UI:               UI{Label: "Mode", Group: "execution", Order: 0, Widget: WidgetSelect},
 	},
 	{
 		Key:           "agent.max_parallel_runs",
@@ -301,6 +309,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityMedium,
 		Description:   "Maximum concurrent agent runs attributable to one actor.",
+		UI:            UI{Label: "Max parallel runs", Group: "agent", Order: 4, Widget: WidgetNumber},
 	},
 	{
 		Key:           "agent.max_subagent_depth",
@@ -315,6 +324,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityHigh,
 		Description:   "Maximum subagent nesting depth (ORC-2).",
+		UI:            UI{Label: "Max subagent depth", Group: "agent", Order: 5, Widget: WidgetNumber},
 	},
 	{
 		Key:              "agent.plan_before_code",
@@ -328,6 +338,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityMedium,
 		Description:      "Require an approved plan before a Code run may mutate the workspace.",
+		UI:               UI{Label: "Plan before code", Group: "agent", Order: 3, Widget: WidgetToggle},
 	},
 	{
 		Key:           "agent.retry_limit",
@@ -342,6 +353,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityMedium,
 		Description:   "Maximum self-correction attempts per failing step (COR-5).",
+		UI:            UI{Label: "Retry limit", Group: "agent", Order: 6, Widget: WidgetNumber},
 	},
 	{
 		Key:           "agent.tools.allowed",
@@ -354,6 +366,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextToolCall,
 		SecurityClass: SecurityCritical,
 		Description:   "Tool identifiers a run may invoke. Scopes intersect; lower scopes cannot widen.",
+		UI:            UI{Label: "Allowed", Group: "tools", Order: 10, Widget: WidgetList},
 	},
 	{
 		Key:           "agent.tools.denied",
@@ -366,6 +379,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextToolCall,
 		SecurityClass: SecurityCritical,
 		Description:   "Tool identifiers no run may invoke. Denials from every scope are unioned.",
+		UI:            UI{Label: "Denied", Group: "tools", Order: 9, Widget: WidgetList},
 	},
 	{
 		Key:           "context.indexing.enabled",
@@ -378,6 +392,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextIndex,
 		SecurityClass: SecurityMedium,
 		Description:   "Build and maintain local retrieval indexes for registered sources.",
+		UI:            UI{Label: "Enabled", Group: "indexing", Order: 0, Widget: WidgetToggle},
 	},
 	{
 		Key:           "context.indexing.excluded_globs",
@@ -390,6 +405,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextIndex,
 		SecurityClass: SecurityMedium,
 		Description:   "Additional exclusion patterns, unioned across scopes. `.modbit/` holds Modbit's own state, including index snapshots; indexing it would make each scan record the previous scan's output as repository content. The union merge means no scope can remove that exclusion.",
+		UI:            UI{Label: "Excluded globs", Group: "indexing", Order: 4, Widget: WidgetList},
 	},
 	{
 		Key:              "context.indexing.location",
@@ -404,6 +420,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextIndex,
 		SecurityClass:    SecurityCritical,
 		Description:      "Where index segments are built and stored. Local is the most restrictive boundary.",
+		UI:               UI{Label: "Location", Group: "indexing", Order: 1, Widget: WidgetSelect},
 	},
 	{
 		Key:           "context.indexing.max_file_bytes",
@@ -418,6 +435,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextIndex,
 		SecurityClass: SecurityLow,
 		Description:   "Files larger than this are referenced but not parsed or embedded.",
+		UI:            UI{Label: "Max file bytes", Group: "indexing", Order: 2, Widget: WidgetNumber},
 	},
 	{
 		Key:              "context.indexing.respect_gitignore",
@@ -431,6 +449,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextIndex,
 		SecurityClass:    SecurityHigh,
 		Description:      "Exclude gitignored paths from indexing and retrieval.",
+		UI:               UI{Label: "Respect gitignore", Group: "indexing", Order: 3, Widget: WidgetToggle},
 	},
 	{
 		Key:           "context.retrieval.budget_tokens",
@@ -445,6 +464,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityLow,
 		Description:   "Token budget for one assembled context pack.",
+		UI:            UI{Label: "Budget tokens", Group: "retrieval", Order: 5, Widget: WidgetNumber},
 	},
 	{
 		Key:           "context.retrieval.rerank_depth",
@@ -459,6 +479,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityLow,
 		Description:   "Number of candidates passed to reranking before token-budget packing.",
+		UI:            UI{Label: "Rerank depth", Group: "retrieval", Order: 6, Widget: WidgetNumber},
 	},
 	{
 		Key:              "context.sources.clipboard",
@@ -472,6 +493,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectImmediate,
 		SecurityClass:    SecurityCritical,
 		Description:      "Include clipboard contents. Requires explicit opt-in at every use.",
+		UI:               UI{Label: "Clipboard", Group: "sources", Order: 9, Widget: WidgetToggle},
 	},
 	{
 		Key:           "context.sources.enabled",
@@ -484,6 +506,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityHigh,
 		Description:   "Context source kinds eligible for retrieval. Scopes intersect so an administrator can remove a source class that a user cannot restore.",
+		UI:            UI{Label: "Enabled", Group: "sources", Order: 7, Widget: WidgetList},
 	},
 	{
 		Key:              "context.sources.terminal_history",
@@ -497,6 +520,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityCritical,
 		Description:      "Include terminal selections and recent commands in retrieval. Off by default because shell history is a common secret-bearing surface (INV-11).",
+		UI:               UI{Label: "Terminal history", Group: "sources", Order: 8, Widget: WidgetToggle},
 	},
 	{
 		Key:           "execution.commands_outside_sandbox",
@@ -509,6 +533,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextToolCall,
 		SecurityClass: SecurityCritical,
 		Description:   "Explicit escape hatch. Every entry is audited on use; empty is the safe default.",
+		UI:            UI{Label: "Commands outside sandbox", Group: "execution", Order: 11, Widget: WidgetList},
 	},
 	{
 		Key:              "execution.dangerous_commands",
@@ -523,6 +548,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextToolCall,
 		SecurityClass:    SecurityCritical,
 		Description:      "Handling for commands classified as destructive or privilege changing.",
+		UI:               UI{Label: "Dangerous commands", Group: "execution", Order: 10, Widget: WidgetSelect},
 	},
 	{
 		Key:           "execution.filesystem.protected_paths",
@@ -535,6 +561,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Paths no tool may read or write regardless of write roots.",
+		UI:            UI{Label: "Protected paths", Group: "filesystem", Order: 4, Widget: WidgetList},
 	},
 	{
 		Key:           "execution.filesystem.write_roots",
@@ -547,6 +574,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Absolute or workspace-relative roots the sandbox may write to.",
+		UI:            UI{Label: "Write roots", Group: "filesystem", Order: 3, Widget: WidgetList},
 	},
 	{
 		Key:           "execution.limits.memory_mb",
@@ -561,6 +589,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityMedium,
 		Description:   "Memory ceiling for a single sandboxed process.",
+		UI:            UI{Label: "Memory MB", Group: "limits", Order: 9, Widget: WidgetNumber},
 	},
 	{
 		Key:           "execution.limits.wall_time_seconds",
@@ -575,6 +604,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityHigh,
 		Description:   "Wall-clock ceiling for a single sandboxed process.",
+		UI:            UI{Label: "Wall time seconds", Group: "limits", Order: 8, Widget: WidgetNumber},
 	},
 	{
 		Key:           "execution.network.allowed_domains",
@@ -587,6 +617,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Domains reachable in allowlist mode. Scopes intersect.",
+		UI:            UI{Label: "Allowed domains", Group: "network", Order: 6, Widget: WidgetList},
 	},
 	{
 		Key:           "execution.network.denied_domains",
@@ -599,6 +630,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Domains never reachable, overriding any allowlist.",
+		UI:            UI{Label: "Denied domains", Group: "network", Order: 7, Widget: WidgetList},
 	},
 	{
 		Key:              "execution.network.mode",
@@ -613,6 +645,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityCritical,
 		Description:      "Egress posture for sandboxed processes.",
+		UI:               UI{Label: "Mode", Group: "network", Order: 5, Widget: WidgetSelect},
 	},
 	{
 		Key:              "execution.sandbox.enabled",
@@ -626,6 +659,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityCritical,
 		Description:      "Run tool execution inside a SandboxBackend.",
+		UI:               UI{Label: "Enabled", Group: "sandbox", Order: 0, Widget: WidgetToggle},
 	},
 	{
 		Key:              "execution.sandbox.fail_closed",
@@ -639,6 +673,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityCritical,
 		Description:      "Refuse execution when a mandatory sandbox control cannot be established (SBX-6).",
+		UI:               UI{Label: "Fail closed", Group: "sandbox", Order: 1, Widget: WidgetToggle},
 	},
 	{
 		Key:              "execution.sandbox.min_isolation",
@@ -653,6 +688,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityCritical,
 		Description:      "Minimum isolation strength a backend must report to be eligible (SBX-4).",
+		UI:               UI{Label: "Min isolation", Group: "sandbox", Order: 2, Widget: WidgetSelect},
 	},
 	{
 		Key:           "model.adaptive_router.enabled",
@@ -665,6 +701,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityMedium,
 		Description:   "Allow the gateway to select a route within the policy envelope.",
+		UI:            UI{Label: "Enabled", Group: "adaptive_router", Order: 3, Widget: WidgetToggle},
 	},
 	{
 		Key:           "model.aliases.allowed",
@@ -677,6 +714,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityHigh,
 		Description:   "Model capability aliases eligible for routing.",
+		UI:            UI{Label: "Allowed", Group: "aliases", Order: 1, Widget: WidgetList},
 	},
 	{
 		Key:           "model.context_window_cap_tokens",
@@ -691,6 +729,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityMedium,
 		Description:   "Upper bound on prompt tokens assembled for one model call.",
+		UI:            UI{Label: "Context window cap tokens", Group: "model", Order: 5, Widget: WidgetNumber},
 	},
 	{
 		Key:           "model.cost_cap_per_run_micros",
@@ -705,6 +744,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityHigh,
 		Description:   "Per-run inference spend ceiling in micro-units of the reporting currency.",
+		UI:            UI{Label: "Cost cap per run micros", Group: "model", Order: 6, Widget: WidgetNumber},
 	},
 	{
 		Key:           "model.local_first",
@@ -717,6 +757,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityMedium,
 		Description:   "Prefer local inference endpoints when they satisfy required capabilities.",
+		UI:            UI{Label: "Local first", Group: "model", Order: 2, Widget: WidgetToggle},
 	},
 	{
 		Key:              "model.max_reasoning_effort",
@@ -731,6 +772,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityMedium,
 		Description:      "Ceiling on provider reasoning controls where the provider exposes them.",
+		UI:               UI{Label: "Max reasoning effort", Group: "model", Order: 4, Widget: WidgetSelect},
 	},
 	{
 		Key:           "model.pinned_revisions",
@@ -743,6 +785,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityHigh,
 		Description:   "Alias-to-revision pins that hold a route at a verified provider revision (MOD-5).",
+		UI:            UI{Label: "Pinned revisions", Group: "model", Order: 9, Widget: WidgetJSON},
 	},
 	{
 		Key:              "model.prompt_body_logging",
@@ -757,6 +800,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectImmediate,
 		SecurityClass:    SecurityCritical,
 		Description:      "Prompt and completion body capture. Metadata-only is the product default (INV-4).",
+		UI:               UI{Label: "Prompt body logging", Group: "model", Order: 10, Widget: WidgetSelect},
 	},
 	{
 		Key:           "model.providers.allowed",
@@ -769,6 +813,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Provider ids eligible for routing. Scopes intersect; lower scopes cannot widen.",
+		UI:            UI{Label: "Allowed", Group: "providers", Order: 0, Widget: WidgetList},
 	},
 	{
 		Key:           "model.residency.required_regions",
@@ -781,6 +826,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Regions a route must satisfy. Empty means no residency constraint.",
+		UI:            UI{Label: "Required regions", Group: "residency", Order: 7, Widget: WidgetList},
 	},
 	{
 		Key:           "model.retention.max_provider_days",
@@ -795,6 +841,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Maximum provider-side retention a route may have. Zero requires zero retention.",
+		UI:            UI{Label: "Max provider days", Group: "retention", Order: 8, Widget: WidgetNumber},
 	},
 	{
 		Key:              "taint.declassification.allowed",
@@ -808,6 +855,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectImmediate,
 		SecurityClass:    SecurityCritical,
 		Description:      "Permit authorized declassification of tainted content (TNT-2).",
+		UI:               UI{Label: "Allowed", Group: "declassification", Order: 4, Widget: WidgetToggle},
 	},
 	{
 		Key:              "taint.declassification.min_role",
@@ -822,6 +870,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectImmediate,
 		SecurityClass:    SecurityCritical,
 		Description:      "Lowest role that may record a declassification with actor and rationale.",
+		UI:               UI{Label: "Min role", Group: "declassification", Order: 5, Widget: WidgetSelect},
 	},
 	{
 		Key:              "taint.enforcement.enabled",
@@ -835,6 +884,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextRun,
 		SecurityClass:    SecurityCritical,
 		Description:      "Enforce provenance taint as a policy dimension (TNT-3).",
+		UI:               UI{Label: "Enabled", Group: "enforcement", Order: 0, Widget: WidgetToggle},
 	},
 	{
 		Key:           "taint.escalation.side_effect_classes",
@@ -847,6 +897,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextToolCall,
 		SecurityClass: SecurityCritical,
 		Description:   "Side-effect classes subject to taint escalation.",
+		UI:            UI{Label: "Side effect classes", Group: "escalation", Order: 2, Widget: WidgetList},
 	},
 	{
 		Key:           "taint.escalation.trigger_classes",
@@ -859,6 +910,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextToolCall,
 		SecurityClass: SecurityCritical,
 		Description:   "Provenance classes that escalate approval class for externally compensatable and externally irreversible operations (TNT-4). Scopes union; a class can be added but not removed by a lower scope.",
+		UI:            UI{Label: "Trigger classes", Group: "escalation", Order: 1, Widget: WidgetList},
 	},
 	{
 		Key:              "taint.plan_declaration.exempts_escalation",
@@ -872,6 +924,7 @@ var definitions = []Definition{
 		ChangeEffect:     EffectNextToolCall,
 		SecurityClass:    SecurityCritical,
 		Description:      "Honour the TNT-4 carve-out for operations declared in the approved plan before the taint entered. Setting false removes the carve-out and is strictly more restrictive.",
+		UI:               UI{Label: "Exempts escalation", Group: "plan_declaration", Order: 3, Widget: WidgetToggle},
 	},
 	{
 		Key:           "taint.unknown_provenance.class",
@@ -885,6 +938,7 @@ var definitions = []Definition{
 		ChangeEffect:  EffectNextRun,
 		SecurityClass: SecurityCritical,
 		Description:   "Class assigned to content whose provenance cannot be verified (TNT-6). The default resolves to the highest-risk registered class; the alternatives exist only to pin a specific class for audit clarity and can never resolve lower than the pinned value.",
+		UI:            UI{Label: "Class", Group: "unknown_provenance", Order: 6, Widget: WidgetSelect},
 	},
 }
 

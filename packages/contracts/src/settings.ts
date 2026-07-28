@@ -120,7 +120,18 @@ export interface SettingDefinition {
   readonly securityClass: SecurityClass;
   readonly description: string;
   readonly deprecated: boolean;
+  readonly ui: SettingUI;
 }
+
+export interface SettingUI {
+  readonly label: string;
+  readonly group: string;
+  readonly order: number;
+  readonly widget: Widget;
+  readonly advanced: boolean;
+}
+
+export type Widget = "toggle" | "select" | "number" | "text" | "list" | "json";
 
 export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>> = {
   [SettingKey.AGENT_APPROVAL_DURATION]: {
@@ -136,6 +147,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "immediate",
     securityClass: "high",
     description: "How long a granted approval may be reused before it must be requested again.",
+    ui: { label: "Duration", group: "approval", order: 11, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_APPROVAL_EXPIRATION_SECONDS]: {
@@ -151,6 +163,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "immediate",
     securityClass: "high",
     description: "Lifetime of a pending approval request before it expires (SFX-3).",
+    ui: { label: "Expiration seconds", group: "approval", order: 13, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_APPROVAL_TWO_PERSON_THRESHOLD]: {
@@ -166,6 +179,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Lowest side-effect class that requires two distinct human approvers.",
+    ui: { label: "Two person threshold", group: "approval", order: 12, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_AUTO_CREATE_WORKTREE]: {
@@ -179,6 +193,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "low",
     description: "Create an isolated git worktree for each Code run.",
+    ui: { label: "Auto create worktree", group: "agent", order: 8, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_AUTO_VERIFY_BEFORE_COMPLETION]: {
@@ -193,6 +208,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "high",
     description: "Require the Verify workflow to pass before a run may report completion.",
+    ui: { label: "Auto verify before completion", group: "agent", order: 7, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_DEFAULT_MODE]: {
@@ -207,6 +223,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "low",
     description: "Workflow mode a new session starts in.",
+    ui: { label: "Default mode", group: "agent", order: 1, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_DEFAULT_PROFILE]: {
@@ -220,6 +237,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Agent Profile id applied when a run does not name one.",
+    ui: { label: "Default profile", group: "agent", order: 2, widget: "text", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_EXECUTION_MODE]: {
@@ -235,6 +253,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "high",
     description: "Controls when agent tool calls require approval.",
+    ui: { label: "Mode", group: "execution", order: 0, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_MAX_PARALLEL_RUNS]: {
@@ -250,6 +269,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Maximum concurrent agent runs attributable to one actor.",
+    ui: { label: "Max parallel runs", group: "agent", order: 4, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_MAX_SUBAGENT_DEPTH]: {
@@ -265,6 +285,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "high",
     description: "Maximum subagent nesting depth (ORC-2).",
+    ui: { label: "Max subagent depth", group: "agent", order: 5, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_PLAN_BEFORE_CODE]: {
@@ -279,6 +300,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Require an approved plan before a Code run may mutate the workspace.",
+    ui: { label: "Plan before code", group: "agent", order: 3, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_RETRY_LIMIT]: {
@@ -294,6 +316,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Maximum self-correction attempts per failing step (COR-5).",
+    ui: { label: "Retry limit", group: "agent", order: 6, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_TOOLS_ALLOWED]: {
@@ -307,6 +330,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Tool identifiers a run may invoke. Scopes intersect; lower scopes cannot widen.",
+    ui: { label: "Allowed", group: "tools", order: 10, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.AGENT_TOOLS_DENIED]: {
@@ -320,6 +344,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Tool identifiers no run may invoke. Denials from every scope are unioned.",
+    ui: { label: "Denied", group: "tools", order: 9, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_INDEXING_ENABLED]: {
@@ -333,6 +358,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_index",
     securityClass: "medium",
     description: "Build and maintain local retrieval indexes for registered sources.",
+    ui: { label: "Enabled", group: "indexing", order: 0, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_INDEXING_EXCLUDED_GLOBS]: {
@@ -346,6 +372,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_index",
     securityClass: "medium",
     description: "Additional exclusion patterns, unioned across scopes. `.modbit/` holds Modbit's own state, including index snapshots; indexing it would make each scan record the previous scan's output as repository content. The union merge means no scope can remove that exclusion.",
+    ui: { label: "Excluded globs", group: "indexing", order: 4, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_INDEXING_LOCATION]: {
@@ -361,6 +388,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_index",
     securityClass: "critical",
     description: "Where index segments are built and stored. Local is the most restrictive boundary.",
+    ui: { label: "Location", group: "indexing", order: 1, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_INDEXING_MAX_FILE_BYTES]: {
@@ -376,6 +404,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_index",
     securityClass: "low",
     description: "Files larger than this are referenced but not parsed or embedded.",
+    ui: { label: "Max file bytes", group: "indexing", order: 2, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_INDEXING_RESPECT_GITIGNORE]: {
@@ -390,6 +419,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_index",
     securityClass: "high",
     description: "Exclude gitignored paths from indexing and retrieval.",
+    ui: { label: "Respect gitignore", group: "indexing", order: 3, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_RETRIEVAL_BUDGET_TOKENS]: {
@@ -405,6 +435,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "low",
     description: "Token budget for one assembled context pack.",
+    ui: { label: "Budget tokens", group: "retrieval", order: 5, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_RETRIEVAL_RERANK_DEPTH]: {
@@ -420,6 +451,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "low",
     description: "Number of candidates passed to reranking before token-budget packing.",
+    ui: { label: "Rerank depth", group: "retrieval", order: 6, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_SOURCES_CLIPBOARD]: {
@@ -434,6 +466,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "immediate",
     securityClass: "critical",
     description: "Include clipboard contents. Requires explicit opt-in at every use.",
+    ui: { label: "Clipboard", group: "sources", order: 9, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_SOURCES_ENABLED]: {
@@ -447,6 +480,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "high",
     description: "Context source kinds eligible for retrieval. Scopes intersect so an administrator can remove a source class that a user cannot restore.",
+    ui: { label: "Enabled", group: "sources", order: 7, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.CONTEXT_SOURCES_TERMINAL_HISTORY]: {
@@ -461,6 +495,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Include terminal selections and recent commands in retrieval. Off by default because shell history is a common secret-bearing surface (INV-11).",
+    ui: { label: "Terminal history", group: "sources", order: 8, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_COMMANDS_OUTSIDE_SANDBOX]: {
@@ -474,6 +509,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Explicit escape hatch. Every entry is audited on use; empty is the safe default.",
+    ui: { label: "Commands outside sandbox", group: "execution", order: 11, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_DANGEROUS_COMMANDS]: {
@@ -489,6 +525,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Handling for commands classified as destructive or privilege changing.",
+    ui: { label: "Dangerous commands", group: "execution", order: 10, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_FILESYSTEM_PROTECTED_PATHS]: {
@@ -502,6 +539,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Paths no tool may read or write regardless of write roots.",
+    ui: { label: "Protected paths", group: "filesystem", order: 4, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_FILESYSTEM_WRITE_ROOTS]: {
@@ -515,6 +553,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Absolute or workspace-relative roots the sandbox may write to.",
+    ui: { label: "Write roots", group: "filesystem", order: 3, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_LIMITS_MEMORY_MB]: {
@@ -530,6 +569,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Memory ceiling for a single sandboxed process.",
+    ui: { label: "Memory MB", group: "limits", order: 9, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_LIMITS_WALL_TIME_SECONDS]: {
@@ -545,6 +585,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "high",
     description: "Wall-clock ceiling for a single sandboxed process.",
+    ui: { label: "Wall time seconds", group: "limits", order: 8, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_NETWORK_ALLOWED_DOMAINS]: {
@@ -558,6 +599,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Domains reachable in allowlist mode. Scopes intersect.",
+    ui: { label: "Allowed domains", group: "network", order: 6, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_NETWORK_DENIED_DOMAINS]: {
@@ -571,6 +613,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Domains never reachable, overriding any allowlist.",
+    ui: { label: "Denied domains", group: "network", order: 7, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_NETWORK_MODE]: {
@@ -586,6 +629,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Egress posture for sandboxed processes.",
+    ui: { label: "Mode", group: "network", order: 5, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_SANDBOX_ENABLED]: {
@@ -600,6 +644,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Run tool execution inside a SandboxBackend.",
+    ui: { label: "Enabled", group: "sandbox", order: 0, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_SANDBOX_FAIL_CLOSED]: {
@@ -614,6 +659,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Refuse execution when a mandatory sandbox control cannot be established (SBX-6).",
+    ui: { label: "Fail closed", group: "sandbox", order: 1, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.EXECUTION_SANDBOX_MIN_ISOLATION]: {
@@ -629,6 +675,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Minimum isolation strength a backend must report to be eligible (SBX-4).",
+    ui: { label: "Min isolation", group: "sandbox", order: 2, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_ADAPTIVE_ROUTER_ENABLED]: {
@@ -642,6 +689,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Allow the gateway to select a route within the policy envelope.",
+    ui: { label: "Enabled", group: "adaptive_router", order: 3, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_ALIASES_ALLOWED]: {
@@ -655,6 +703,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "high",
     description: "Model capability aliases eligible for routing.",
+    ui: { label: "Allowed", group: "aliases", order: 1, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_CONTEXT_WINDOW_CAP_TOKENS]: {
@@ -670,6 +719,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Upper bound on prompt tokens assembled for one model call.",
+    ui: { label: "Context window cap tokens", group: "model", order: 5, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_COST_CAP_PER_RUN_MICROS]: {
@@ -685,6 +735,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "high",
     description: "Per-run inference spend ceiling in micro-units of the reporting currency.",
+    ui: { label: "Cost cap per run micros", group: "model", order: 6, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_LOCAL_FIRST]: {
@@ -698,6 +749,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Prefer local inference endpoints when they satisfy required capabilities.",
+    ui: { label: "Local first", group: "model", order: 2, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_MAX_REASONING_EFFORT]: {
@@ -713,6 +765,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "medium",
     description: "Ceiling on provider reasoning controls where the provider exposes them.",
+    ui: { label: "Max reasoning effort", group: "model", order: 4, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_PINNED_REVISIONS]: {
@@ -726,6 +779,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "high",
     description: "Alias-to-revision pins that hold a route at a verified provider revision (MOD-5).",
+    ui: { label: "Pinned revisions", group: "model", order: 9, widget: "json", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_PROMPT_BODY_LOGGING]: {
@@ -741,6 +795,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "immediate",
     securityClass: "critical",
     description: "Prompt and completion body capture. Metadata-only is the product default (INV-4).",
+    ui: { label: "Prompt body logging", group: "model", order: 10, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_PROVIDERS_ALLOWED]: {
@@ -754,6 +809,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Provider ids eligible for routing. Scopes intersect; lower scopes cannot widen.",
+    ui: { label: "Allowed", group: "providers", order: 0, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_RESIDENCY_REQUIRED_REGIONS]: {
@@ -767,6 +823,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Regions a route must satisfy. Empty means no residency constraint.",
+    ui: { label: "Required regions", group: "residency", order: 7, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.MODEL_RETENTION_MAX_PROVIDER_DAYS]: {
@@ -782,6 +839,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Maximum provider-side retention a route may have. Zero requires zero retention.",
+    ui: { label: "Max provider days", group: "retention", order: 8, widget: "number", advanced: false },
     deprecated: false,
   },
   [SettingKey.TAINT_DECLASSIFICATION_ALLOWED]: {
@@ -796,6 +854,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "immediate",
     securityClass: "critical",
     description: "Permit authorized declassification of tainted content (TNT-2).",
+    ui: { label: "Allowed", group: "declassification", order: 4, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.TAINT_DECLASSIFICATION_MIN_ROLE]: {
@@ -811,6 +870,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "immediate",
     securityClass: "critical",
     description: "Lowest role that may record a declassification with actor and rationale.",
+    ui: { label: "Min role", group: "declassification", order: 5, widget: "select", advanced: false },
     deprecated: false,
   },
   [SettingKey.TAINT_ENFORCEMENT_ENABLED]: {
@@ -825,6 +885,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Enforce provenance taint as a policy dimension (TNT-3).",
+    ui: { label: "Enabled", group: "enforcement", order: 0, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.TAINT_ESCALATION_SIDE_EFFECT_CLASSES]: {
@@ -838,6 +899,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Side-effect classes subject to taint escalation.",
+    ui: { label: "Side effect classes", group: "escalation", order: 2, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.TAINT_ESCALATION_TRIGGER_CLASSES]: {
@@ -851,6 +913,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Provenance classes that escalate approval class for externally compensatable and externally irreversible operations (TNT-4). Scopes union; a class can be added but not removed by a lower scope.",
+    ui: { label: "Trigger classes", group: "escalation", order: 1, widget: "list", advanced: false },
     deprecated: false,
   },
   [SettingKey.TAINT_PLAN_DECLARATION_EXEMPTS_ESCALATION]: {
@@ -865,6 +928,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_tool_call",
     securityClass: "critical",
     description: "Honour the TNT-4 carve-out for operations declared in the approved plan before the taint entered. Setting false removes the carve-out and is strictly more restrictive.",
+    ui: { label: "Exempts escalation", group: "plan_declaration", order: 3, widget: "toggle", advanced: false },
     deprecated: false,
   },
   [SettingKey.TAINT_UNKNOWN_PROVENANCE_CLASS]: {
@@ -879,6 +943,7 @@ export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>
     changeEffect: "next_run",
     securityClass: "critical",
     description: "Class assigned to content whose provenance cannot be verified (TNT-6). The default resolves to the highest-risk registered class; the alternatives exist only to pin a specific class for audit clarity and can never resolve lower than the pinned value.",
+    ui: { label: "Class", group: "unknown_provenance", order: 6, widget: "select", advanced: false },
     deprecated: false,
   },
 } as const;

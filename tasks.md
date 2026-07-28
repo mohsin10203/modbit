@@ -232,7 +232,7 @@ PRD §6.1. Docket §3.
 |---|---|---|
 | IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
-| SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | 🚧 In Progress — resolver, generation, validation (FND-06/07) and local files (SET-A01b) done; UI metadata outstanding, sync is SET-C01 |
+| SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | ✅ Qualified — every sub-item a–c complete; sync is SET-C01 (Phase 4) |
 | CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**; what remains is six native backends behind ports that already exist and are tested (`c3`–`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
@@ -559,7 +559,7 @@ each invariant was broken in turn and the named test failed.
 |---|---|---|---|---|
 | SET-A01a | Registry, scope resolver, merge strategies, validation | SET-1..SET-7 | ✅ Qualified | delivered as FND-06/07 |
 | SET-A01b | Local settings files — discovery, scope binding, diagnostics | §20A.10, SET-2 | ✅ Qualified | `pkg/settings/files.go`, 9 tests; F1–F8 mutation-verified |
-| SET-A01c | UI metadata on definitions — label, group, order, widget | §20A.6 | ⬜ Ready | Touches the contract schema and all 54 definitions |
+| SET-A01c | UI metadata on definitions — label, group, order, widget | §20A.6 | ✅ Qualified | `pkg/settings/ui.go` + generator; 9 tests; U1–U6 mutation-verified |
 
 **SET-A01b local settings files (F1–F8)**
 
@@ -592,6 +592,39 @@ diagnostics to be sorted and identical.
 | 177 | A symlinked settings file is not followed | A repository can commit a link, and following one would read a file the repository chose from somewhere the layout never declared — the same reasoning as CTX-A01b decision 52 for the indexer. |
 | 178 | Layout paths are joined to a resolved root, never taken from a document | No value inside a settings file can redirect the loader at another path. |
 | 179 | Discovery order is a slice, not a map | It decides which file wins when two author the same key at one scope, and a map would make that vary per run — the same defect as B-9 in the index ignore files. |
+
+**SET-A01c UI metadata (U1–U6)**
+
+§20A.6 requires a settings surface to render every key without hardcoding a list, because a
+hardcoded list is one that silently omits the setting added last week.
+
+**Where the metadata lives was the structural decision.** It goes in `contracts/settings/*.yaml`
+rather than a separate presentation contract: two contracts would be two files that can disagree
+about which keys exist, which is exactly what the drift gate exists to prevent, and the repository
+already treats `contracts/settings/` as the single authority for Go and TypeScript alike.
+
+**Most of it is derived.** A label, group, and widget follow from the key and the type, so a new
+setting is renderable the moment it is declared. The alternative — 54 hand-written labels — has some
+fraction wrong within a release, and nothing to notice. Only what derivation cannot know is
+declared: whether a control belongs behind an "advanced" disclosure is a product judgement, not a
+property of its key.
+
+| # | Invariant |
+|---|---|
+| U1 | Every definition has renderable metadata; there is no unrenderable setting |
+| U2 | Derivation is deterministic: one key and type always give one label, group, and widget |
+| U3 | A declared value always wins over a derived one |
+| U4 | A widget is compatible with the type it renders |
+| U5 | Ordering within a group is total and stable |
+| U6 | Security class and change effect reach the surface |
+
+| # | Decision | Rationale |
+|---|---|---|
+| 180 | UI metadata lives in the **settings contract**, not a second document | Two contracts can disagree about which keys exist. One contract with a drift gate cannot. |
+| 181 | An incompatible widget is refused at **generation** | A string list rendered as a toggle is not cosmetic: the surface would write a boolean into a setting whose merge is `union`, and the resolver would reject it at the worst possible moment. |
+| 182 | Order defaults to **declaration order in the contract file** | That sequence is already reviewed — the author grouped related keys together — so it beats anything derivable from the key and costs nothing to carry. |
+| 183 | `Sensitive()` surfaces the security consequence | A `critical` setting rendered as an ordinary toggle tells the user nothing about what they are changing. The registry cannot force a surface to render well, but it can refuse to let one claim it did not know. |
+| 184 | The generator **duplicates** the widget and initialism tables, and a test compares them | The non-test generator importing `pkg/settings` would make a clean-tree build circular: producing `definitions_gen.go` would require the package that requires it. A test in the generator's package has no such problem, so that is where the duplication is kept honest. Comparing only the keys in the registry was not enough — an unused initialism can drift for releases before a key needs it, so the guard walks both tables directly. |
 
 ### QA-A01 breakdown
 

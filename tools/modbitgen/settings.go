@@ -36,9 +36,20 @@ type settingDef struct {
 	SecurityClass    string   `yaml:"security_class"`
 	Description      string   `yaml:"description"`
 	Deprecated       bool     `yaml:"deprecated"`
+	// UI metadata. All optional: what can be derived from the key and type is derived, so a new
+	// setting is renderable the moment it is declared. Only what derivation cannot know is declared
+	// here — an "advanced" disclosure is a product judgement, not a property of a key.
+	Label    string `yaml:"label"`
+	Group    string `yaml:"group"`
+	Widget   string `yaml:"widget"`
+	Advanced bool   `yaml:"advanced"`
 
 	namespace string
 	version   int
+	// uiOrder is the setting's position within its contract file. Declaration order is already a
+	// reviewed sequence — the author grouped related keys together — so it is a better default
+	// ordering than anything derivable from the key, and it costs nothing to carry.
+	uiOrder int
 }
 
 var (
@@ -105,15 +116,19 @@ func loadSettingsCatalog(dir string) (*settingsCatalog, error) {
 			return nil, fmt.Errorf("%s: version is required (SET-3)", p)
 		}
 		catalog.Namespaces = append(catalog.Namespaces, f.Namespace)
-		for _, d := range f.Settings {
+		for index, d := range f.Settings {
 			if prev, dup := seen[d.Key]; dup {
 				return nil, fmt.Errorf("%s: duplicate settings key %q (already defined in %s)", p, d.Key, prev)
 			}
 			seen[d.Key] = p
 			d.namespace = f.Namespace
 			d.version = f.Version
+			d.uiOrder = index
 			if err := d.validate(p); err != nil {
 				return nil, err
+			}
+			if err := d.validateUI(); err != nil {
+				return nil, fmt.Errorf("%s: %w", p, err)
 			}
 			catalog.Definitions = append(catalog.Definitions, d)
 		}
@@ -346,6 +361,13 @@ func (c *settingsCatalog) emitGo() []byte {
 		if d.Deprecated {
 			b.WriteString("\t\tDeprecated:       true,\n")
 		}
+		ui := d.uiMetadata()
+		fmt.Fprintf(&b, "\t\tUI: UI{Label: %s, Group: %s, Order: %d, Widget: %s",
+			goQuote(ui.label), goQuote(ui.group), ui.order, widgetIdent(ui.widget))
+		if ui.advanced {
+			b.WriteString(", Advanced: true")
+		}
+		b.WriteString("},\n")
 		b.WriteString("\t},\n")
 	}
 	b.WriteString("}\n\nfunc ptrInt64(v int64) *int64 { return &v }\n")
@@ -401,7 +423,16 @@ func (c *settingsCatalog) emitTS() []byte {
 	b.WriteString("  readonly min?: number;\n  readonly max?: number;\n  readonly scopes: readonly SettingScope[];\n")
 	b.WriteString("  readonly merge: MergeStrategy;\n  readonly restrictiveOrder?: readonly unknown[];\n")
 	b.WriteString("  readonly changeEffect: ChangeEffect;\n  readonly securityClass: SecurityClass;\n")
-	b.WriteString("  readonly description: string;\n  readonly deprecated: boolean;\n}\n\n")
+	b.WriteString("  readonly description: string;\n  readonly deprecated: boolean;\n")
+	// §20A.6: ts_sdk and web are declared surfaces for the settings capability, so they need the
+	// same presentation metadata the Go registry carries. Emitting it from one contract is what
+	// stops the two surfaces disagreeing about what a control is called.
+	b.WriteString("  readonly ui: SettingUI;\n}\n\n")
+	b.WriteString("export interface SettingUI {\n")
+	b.WriteString("  readonly label: string;\n  readonly group: string;\n")
+	b.WriteString("  readonly order: number;\n  readonly widget: Widget;\n")
+	b.WriteString("  readonly advanced: boolean;\n}\n\n")
+	b.WriteString("export type Widget = \"toggle\" | \"select\" | \"number\" | \"text\" | \"list\" | \"json\";\n\n")
 
 	b.WriteString("export const SETTING_DEFINITIONS: Readonly<Record<SettingKey, SettingDefinition>> = {\n")
 	for _, d := range c.Definitions {
@@ -428,6 +459,9 @@ func (c *settingsCatalog) emitTS() []byte {
 		fmt.Fprintf(&b, "    changeEffect: %s,\n", goQuote(d.ChangeEffect))
 		fmt.Fprintf(&b, "    securityClass: %s,\n", goQuote(d.SecurityClass))
 		fmt.Fprintf(&b, "    description: %s,\n", goQuote(strings.Join(strings.Fields(d.Description), " ")))
+		ui := d.uiMetadata()
+		fmt.Fprintf(&b, "    ui: { label: %s, group: %s, order: %d, widget: %s, advanced: %t },\n",
+			goQuote(ui.label), goQuote(ui.group), ui.order, goQuote(ui.widget), ui.advanced)
 		fmt.Fprintf(&b, "    deprecated: %t,\n", d.Deprecated)
 		b.WriteString("  },\n")
 	}
@@ -456,4 +490,123 @@ func asInt64(v any) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// resolvedUI is a definition's presentation metadata after derivation and overrides.
+type resolvedUI struct {
+	label    string
+	group    string
+	order    int
+	widget   string
+	advanced bool
+}
+
+// widgetsForType mirrors pkg/settings.widgetsForType. It is duplicated rather than imported because
+// the generator must not depend on the package it generates — a generator that imported its own
+// output could not build from a clean tree. The pair is kept honest by
+// TestGeneratorWidgetTableMatchesTheRuntime.
+var widgetsForType = map[string][]string{
+	"bool":        {"toggle"},
+	"int":         {"number"},
+	"number":      {"number"},
+	"string":      {"text", "select"},
+	"enum":        {"select"},
+	"string_list": {"list"},
+	"object":      {"json"},
+}
+
+// uiMetadata derives presentation metadata, letting any declared value win (U3).
+func (d settingDef) uiMetadata() resolvedUI {
+	ui := resolvedUI{
+		label:    d.Label,
+		group:    d.Group,
+		widget:   d.Widget,
+		advanced: d.Advanced,
+		order:    d.uiOrder,
+	}
+	if ui.label == "" {
+		ui.label = deriveLabel(d.Key)
+	}
+	if ui.group == "" {
+		ui.group = deriveGroup(d.Key)
+	}
+	if ui.widget == "" {
+		ui.widget = defaultWidget(d.Type)
+	}
+	return ui
+}
+
+// widgetIdent maps a contract widget name onto its Go constant. It is an explicit table rather than
+// goIdent because "json" must become WidgetJSON, and a generic identifier rule produces WidgetJson —
+// a mismatch the compiler catches, but only after the generated file is written.
+func widgetIdent(widget string) string {
+	switch widget {
+	case "toggle":
+		return "WidgetToggle"
+	case "select":
+		return "WidgetSelect"
+	case "number":
+		return "WidgetNumber"
+	case "text":
+		return "WidgetText"
+	case "list":
+		return "WidgetList"
+	default:
+		return "WidgetJSON"
+	}
+}
+
+func defaultWidget(t string) string {
+	if allowed := widgetsForType[t]; len(allowed) > 0 {
+		return allowed[0]
+	}
+	return "json"
+}
+
+// generatorInitialisms mirrors pkg/settings.initialisms, for the same reason widgetsForType is
+// duplicated.
+var generatorInitialisms = map[string]string{
+	"api": "API", "cpu": "CPU", "dlp": "DLP", "gpu": "GPU", "id": "ID",
+	"ide": "IDE", "mb": "MB", "mcp": "MCP", "sso": "SSO", "ttl": "TTL",
+	"ui": "UI", "url": "URL", "vcs": "VCS",
+}
+
+func deriveLabel(key string) string {
+	segments := strings.Split(key, ".")
+	words := strings.Split(segments[len(segments)-1], "_")
+	for i, word := range words {
+		if word == "" {
+			continue
+		}
+		if upper, ok := generatorInitialisms[word]; ok {
+			words[i] = upper
+			continue
+		}
+		if i == 0 {
+			words[i] = strings.ToUpper(word[:1]) + word[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+func deriveGroup(key string) string {
+	segments := strings.Split(key, ".")
+	if len(segments) >= 3 {
+		return segments[1]
+	}
+	return segments[0]
+}
+
+// validateUI refuses a widget that cannot render its type (U4).
+func (d settingDef) validateUI() error {
+	if d.Widget == "" {
+		return nil
+	}
+	for _, allowed := range widgetsForType[d.Type] {
+		if allowed == d.Widget {
+			return nil
+		}
+	}
+	return fmt.Errorf("setting %q: widget %q cannot render type %q (permitted: %v)",
+		d.Key, d.Widget, d.Type, widgetsForType[d.Type])
 }

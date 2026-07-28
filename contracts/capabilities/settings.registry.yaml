@@ -16,6 +16,7 @@ requirements:
   - PRD-v5.1-§20A.3-SET-2
   - PRD-v5.1-§20A.4-SET-3
   - PRD-v5.1-§20A.5-SET-6
+  - PRD-v5.1-§20A.6-settings-ui
   - PRD-v5.1-§20A.10-settings-files
 
 surfaces:
@@ -56,3 +57,17 @@ tests:
   - pkg/settings:TestDiscoveryOrderIsDeterministic
   - pkg/settings:TestAMissingFileIsAnOrdinaryOutcome
   - pkg/settings:TestLoadedLayersResolveThroughTheRegistry
+  # UI metadata (SET-A01c). §20A.6 makes ts_sdk and web declared surfaces, so presentation metadata
+  # is generated from this contract rather than living in a second document that can disagree.
+  - pkg/settings:TestEverySettingIsRenderable
+  - pkg/settings:TestDerivationIsDeterministic
+  - pkg/settings:TestInitialismsAreNotMangled
+  - pkg/settings:TestDeclaredMetadataOverridesDerivation
+  - pkg/settings:TestSecurityAWidgetMustBeAbleToRenderItsType
+  - pkg/settings:TestOrderingWithinAGroupIsTotal
+  - pkg/settings:TestSecurityConsequenceReachesTheSurface
+  - pkg/settings:TestGeneratedWidgetsMatchTheRuntimeTable
+  - pkg/settings:TestGeneratedLabelsMatchTheRuntimeDerivation
+  - tools/modbitgen:TestGeneratorWidgetTableMatchesTheRuntime
+  - tools/modbitgen:TestGeneratorInitialismsMatchTheRuntime
+  - tools/modbitgen:TestGeneratorGroupDerivationMatchesTheRuntime
