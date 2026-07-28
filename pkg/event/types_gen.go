@@ -84,6 +84,12 @@ const (
 	TypeRunCancelled                 Type = "run.cancelled"
 	TypeRunCheckpointCreated         Type = "run.checkpoint.created"
 	TypeRunHalted                    Type = "run.halted"
+	TypeRunMessageQueued             Type = "run.message.queued"
+	TypeRunMessageIncorporated       Type = "run.message.incorporated"
+	TypeRunMessageSuperseded         Type = "run.message.superseded"
+	TypeRunMessageRejected           Type = "run.message.rejected"
+	TypeRunMessageReordered          Type = "run.message.reordered"
+	TypeRunInterrupted               Type = "run.interrupted"
 	TypeRunReversionCompleted        Type = "run.reversion.completed"
 	TypeRunReversionIncomplete       Type = "run.reversion.incomplete"
 	TypeRunStepStarted               Type = "run.step.started"
@@ -261,6 +267,48 @@ var specs = map[Type]Spec{
 	},
 	TypeRunHalted: {
 		Type:    "run.halted",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   true,
+	},
+	TypeRunMessageQueued: {
+		Type:    "run.message.queued",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   false,
+	},
+	TypeRunMessageIncorporated: {
+		Type:    "run.message.incorporated",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   false,
+	},
+	TypeRunMessageSuperseded: {
+		Type:    "run.message.superseded",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   false,
+	},
+	TypeRunMessageRejected: {
+		Type:    "run.message.rejected",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   false,
+	},
+	TypeRunMessageReordered: {
+		Type:    "run.message.reordered",
+		Version: 1,
+		Family:  "run",
+		Scope:   ScopeRun,
+		Audit:   false,
+	},
+	TypeRunInterrupted: {
+		Type:    "run.interrupted",
 		Version: 1,
 		Family:  "run",
 		Scope:   ScopeRun,

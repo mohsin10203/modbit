@@ -70,6 +70,12 @@ events:
   - { type: run.cancelled,              family: run, scope: run, audit: true }
   - { type: run.checkpoint.created,     family: run, scope: run }
   - { type: run.halted,                 family: run, scope: run, audit: true }
+  - { type: run.message.queued,         family: run, scope: run }
+  - { type: run.message.incorporated,   family: run, scope: run }
+  - { type: run.message.superseded,     family: run, scope: run }
+  - { type: run.message.rejected,       family: run, scope: run }
+  - { type: run.message.reordered,      family: run, scope: run }
+  - { type: run.interrupted,            family: run, scope: run, audit: true }
   - { type: run.reversion.completed,    family: run, scope: run, audit: true }
   - { type: run.reversion.incomplete,   family: run, scope: run, audit: true }
 

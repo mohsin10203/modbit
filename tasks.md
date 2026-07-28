@@ -237,7 +237,7 @@ PRD §6.1. Docket §3.
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
-| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | 🚧 In Progress — run state machine Qualified (AGT-A01a); typed tools, steering queue, and completion contract outstanding |
+| AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | 🚧 In Progress — run state machine and steering queue Qualified (AGT-A01a/c); typed tools and completion contract outstanding |
 | EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | ⬜ Proposed |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
@@ -559,7 +559,7 @@ each invariant was broken in turn and the named test failed.
 |---|---|---|---|---|
 | AGT-A01a | Run state machine — phases, modes, halt reasons, bounded loops, checkpoints, resume | RUN-1..RUN-6, COR-5 | ✅ Qualified | `pkg/agent/run.go`, 14 tests; A1–A9 mutation-verified |
 | AGT-A01b | Typed tool registry — schemas, policy checks, taint propagation into results | §11.2, INV-13 | ⬜ Ready | |
-| AGT-A01c | Steering queue — ordered, durable, safe-boundary application, Interrupt Now | STR-1..STR-7 | ⬜ Ready | |
+| AGT-A01c | Steering queue — ordered, durable, safe-boundary application, Interrupt Now | STR-1..STR-7 | ✅ Qualified | `pkg/agent/steering.go`, 12 tests; Q1–Q8 mutation-verified |
 | AGT-A01d | Completion contract — not-run / inconclusive / failed / passed | VER-1, VER-6 | ⬜ Ready | |
 
 **AGT-A01a run protocol (A1–A9)**
@@ -594,6 +594,37 @@ All nine are mutation-verified.
 | 138 | A failed emit **rolls back** the phase | R-EVT-04 makes the state write and the event one act. A run that advanced while its event was lost is the exact divergence the rule prevents, so the transition is undone rather than reported as done. |
 | 139 | Halt reasons map onto **distinct** canonical events | A consumer filtering the audit log for failures must not also catch deliberate cancellations. Completion, failure, and cancellation keep their own types; the remaining five share `run.halted`, which carries the reason. |
 | 140 | `emit` takes no payload map | The canonical envelope carries payloads by reference (`Attributes.PayloadRef`), not inline. A map accepted and discarded reads as though the detail were recorded, which is worse than not offering it — the first draft did exactly that. What a halt records lives in the `Halt` value and the event type. |
+
+**AGT-A01c steering protocol (Q1–Q8)**
+
+STR-1 through STR-7. The queue exists because a message arriving mid-run has to land *somewhere*
+definite: a design that applied user input wherever the agent happened to be reading would make "was
+my correction taken into account" unanswerable, which is what STR-2 exists to prevent.
+
+| # | Invariant |
+|---|---|
+| Q1 | The queue is ordered, and the order is stable across reads |
+| Q2 | A message has exactly one state; pending is the only state that can change |
+| Q3 | Queued steering applies only at a safe boundary |
+| Q4 | An interrupt is distinct from queued steering and records what it interrupted |
+| Q5 | Reordering is optimistically concurrent; a stale version is refused |
+| Q6 | A message that invalidates an authorization is surfaced, never silently incorporated |
+| Q7 | Message provenance is an explicit argument; automation follow-ups are not user-trusted |
+| Q8 | Every state change emits a canonical event |
+
+All eight are mutation-verified. Q2 took two rounds: it is guarded in the callers *and* in `resolve`,
+so removing either layer alone changes nothing observable and removing both fails the test. That is
+recorded in the code as deliberate layering rather than left to look redundant.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 141 | `execute`, `authorize`, `package`, and `complete` are **not** safe boundaries | STR-3 puts steering at a safe boundary, and a boundary is safe when new instruction cannot corrupt work already in flight. A message applied halfway through a file write changes the intent of an edit already partly on disk, and nothing downstream could tell which half belonged to which instruction. |
+| 142 | An unsafe phase yields nothing rather than erroring | The run calls `ApplyAt` at every phase; refusing at `execute` would push the boundary rule onto every caller, which is how it eventually gets got wrong. What must not happen is quiet incorporation, and the map is what prevents that. |
+| 143 | An interrupt is a **distinct operation**, not a flag | STR-6. The two have different consequences and different audit meaning: queued steering waits, an interrupt stops something that was running. It applies at a phase that is deliberately not a safe boundary, which is the whole reason it is separate. An interrupt also leaves queued messages pending — stopping the operation is not the same as discarding instructions the user is still waiting on. |
+| 144 | Steering arriving after `authorize` is **surfaced and left pending** | It would change the plan the approval was granted against — the same class of problem the approval fence epoch solves (decision 24), applied to instructions rather than effects. It stays pending rather than being rejected, because a user who re-authorizes should still have it. |
+| 145 | Provenance is an explicit positional argument | STR-5 lets automations deliver follow-ups through this same contract, so a message is not necessarily user input, and steering is by design content the agent acts on. `taint.Class`'s zero value is `user_trusted`, so a struct field left unset would launder an integration payload into the most trusted class. A positional argument is what Go will not let a caller omit — the same reasoning as MOD-A01 decision 10 for credentials. The `Valid` check guards a *garbage* class, not an unset one, and the code says so rather than implying more. |
+| 146 | Reordering moves only pending messages | Reordering the whole queue would rewrite the record of what was applied and when. The version token is what stops two surfaces silently applying one ordering on top of the other, leaving the loser to discover their arrangement was discarded. |
+| 147 | A run that ends rejects its pending messages | Leaving them pending forever tells a user their correction is still coming. |
 
 ### MOD-A01 breakdown
 
