@@ -421,6 +421,32 @@ before D4 ran. In CI that is a timeout with no attribution, which is worse than 
 Every `Close` the suite performs is now bounded, so a blocking `Close` is reported by D2, D3 and D4
 together instead of hanging the run.
 
+**Repository hygiene — a committed binary, and CI that did not exist**
+
+Two defects found by checking a claim I had written myself. `Makefile` comments said "CI runs it" for
+`perf-gate` and `cross-check`, and `.agents.md` §8 said "CI uses the stable repository commands".
+**There was no CI.** Every gate built this phase — the capability registry, the performance budgets,
+the cross-compilation check — ran only where an author happened to run it, which is the state a gate
+is supposed to prevent.
+
+`.github/workflows/ci.yml` now invokes them. `check` runs on **both macOS and Linux**, because the
+change sources are build-tagged: macOS compiles and exercises FSEvents, Linux compiles and exercises
+its refusing fallback, and a single-platform run would leave one path untested until a release.
+`perf-gate` is scheduled rather than per-push and marked advisory, because these are wall-clock p95
+budgets and a shared runner under load reports numbers about the runner — an early local run said
+286 ms where the idle figure was 21 ms. Every target the workflow invokes was run locally first.
+
+**A 4.5 MB Mach-O arm64 executable was tracked as `modbitgen`.** `go build` with no `-o` drops the
+binary beside the source and `git add -A` committed it — in `128773c`, mine, then modified again in
+`5ff0c73`. It sat in the repository for six commits. Removed, and named explicitly in `.gitignore`
+rather than matched by a pattern broad enough to catch a legitimate extensionless file. No other
+binary is tracked; the check is `git ls-files | xargs file --mime-type`.
+
+The workflow itself is the one thing here that **cannot be verified locally** — there is no GitHub
+Actions runner. Its YAML parses and every command it runs passes on this machine; whether the Linux
+leg of the matrix is green is unknown until it runs, and `make cross-check` only proves those targets
+*build*.
+
 **CTX-A01 pipeline tests — the seams, and what they did not find**
 
 Every stage of the local context path had tests; the **seams between them** had none. The existing

@@ -2,6 +2,12 @@
 /bin/
 /dist/
 /out/
+# Compiled command binaries written into the repository root. `go build` with no -o drops the
+# binary beside the source, and `git add -A` then commits it: a 4.5 MB Mach-O executable was
+# tracked as `modbitgen` for several commits before anyone looked. Named explicitly rather than
+# matched by a pattern, because a rule broad enough to catch any extensionless file would also
+# catch a legitimate one.
+/modbitgen
 
 # Go
 *.test

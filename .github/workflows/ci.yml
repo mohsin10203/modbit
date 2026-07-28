@@ -1,0 +1,93 @@
+# Modbit CI.
+#
+# `.agents.md` §8 states that CI uses the stable repository commands, and `Makefile` comments have
+# been claiming "CI runs it" for the slower gates. Neither was true: no workflow existed. This makes
+# the statement accurate rather than aspirational — a gate nobody runs is documentation, and the
+# whole point of `perf-gate`, `cross-check` and `capability-check` is that they fail somewhere other
+# than on the author's machine.
+#
+# Every target invoked here has been run locally and passes. Nothing aspirational is wired in.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # perf-gate is wall-clock and needs a quiet machine, so it runs on a schedule rather than on
+  # every push, where a busy runner would make it flap. See `pkg/index/perf_test.go`.
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  # The pre-review gate: format, lint, typecheck, generated-code drift, unit tests, and the three
+  # contract gates. This is what `make check` runs, and it is the job that must stay fast.
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both platforms, because the change sources are build-tagged: macOS compiles and exercises
+        # the FSEvents backend, Linux compiles and exercises its refusing fallback. A single-platform
+        # run would leave one of the two paths untested until a release.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make check
+
+  # Build every supported target with cgo disabled. Cheap, and it catches the class of break that is
+  # otherwise invisible until a release: a build-tagged file that only compiles on the author's
+  # platform. It found `modberr.CodeUnimplemented` — a code that does not exist — on its first run.
+  cross-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make cross-check
+
+  # Adversarial and contract suites (R-TST-05, R-TST-06). Separated from `check` so a failure names
+  # which kind of guarantee broke rather than reporting "tests failed".
+  suites:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make test-security
+      - run: make test-conformance
+      - run: make test-integration
+      - run: make test-e2e
+
+  # PRD §8A.3 performance budgets. Scheduled rather than per-push: these are wall-clock p95 budgets,
+  # and a shared runner under load reports numbers that say more about the runner than the code — an
+  # early local run reported LCX-4 at 286 ms where the idle figure was 21 ms.
+  #
+  # It is therefore advisory here. A regression shows up as a failed scheduled run to investigate,
+  # not as a blocked pull request, until it runs on hardware that makes the numbers trustworthy.
+  perf-gate:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make perf-gate
