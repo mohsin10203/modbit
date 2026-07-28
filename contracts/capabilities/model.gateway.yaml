@@ -41,6 +41,24 @@ settings:
   - model.prompt_body_logging
 
 tests:
+  # First provider adapter (MOD-A01g). The egress and credential boundaries are part of this
+  # capability's contract: the adapter is where a leased credential meets a network.
+  - pkg/inference/openai:TestSecurityAdapterRefusesToBuildItsOwnHTTPClient
+  - pkg/inference/openai:TestSecurityEgressRefusalIsNotReportedAsAnOutage
+  - pkg/inference/openai:TestSecurityCredentialTravelsOnlyInTheAuthorizationHeader
+  - pkg/inference/openai:TestSecurityCredentialsAreCheckedBeforeAnyRequest
+  - pkg/inference/openai:TestSecurityUpstreamErrorBodiesNeverReachTheError
+  - pkg/inference/openai:TestCapabilityGapsAreRefusedOrDeclared
+  - pkg/inference/openai:TestMediaWithoutAResolverIsRefusedNotDropped
+  - pkg/inference/openai:TestToolCallsRoundTrip
+  - pkg/inference/openai:TestObservedRevisionComesFromTheResponse
+  - pkg/inference/openai:TestUsageSplitsCachedAndReasoningTokensWithoutDoubleCounting
+  - pkg/inference/openai:TestStreamingAssemblesDeltasAndTerminatesOnce
+  - pkg/inference/openai:TestAStreamThatProducesNothingIsAFailure
+  - pkg/inference/openai:TestCancellationTerminatesTheStreamPromptly
+  - pkg/inference/openai:TestStreamedToolCallFragmentsReassemble
+  - pkg/inference/openai:TestAdapterPassesTheSharedConformanceSuite
+  - pkg/inference/openai:TestConformanceReportCarriesNoUpstreamContent
   - pkg/gateway:TestGatewayRefusesToBeConstructedWithoutItsControls
   - pkg/gateway:TestDLPFailureFailsClosedAndNeverCallsAProvider
   - pkg/gateway:TestDLPBlockRefusesEgress

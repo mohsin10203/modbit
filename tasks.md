@@ -234,7 +234,7 @@ PRD §6.1. Docket §3.
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | 🚧 In Progress — resolver, generation, and validation done (FND-06/07); local files, UI metadata, and sync outstanding |
 | CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**; what remains is six native backends behind ports that already exist and are tested (`c3`–`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
-| MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | 🚧 In Progress — see MOD-A01 breakdown below |
+| MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
 | AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | ⬜ Proposed |
@@ -565,11 +565,48 @@ Capability registry entry: `contracts/capabilities/model.canonical-ir.yaml`.
 | MOD-A01d | Adapter interface + alias registry with deterministic candidate ordering | §14.1, ADP-4 | ✅ Qualified | `pkg/inference/adapter.go` |
 | MOD-A01e | Shared adapter conformance suite | ADP-5, ADP-6 | ✅ Qualified | `pkg/inference/conformance` (16 cases, all 12 ADP-5 areas) + `pkg/inference/fake`; wired into `make test-conformance` |
 | MOD-A01f | Gateway pipeline: settings/policy validation → classification → DLP → route → adapter → usage → immutable metadata | §10 SDD, INV-1, INV-3 | ✅ Qualified (non-streaming) | `pkg/gateway`, 25 assertions. Streaming pipeline and canonical event emission outstanding — see MOD-A01i/j |
-| MOD-A01g | First provider adapter + OpenAI-compatible local endpoint | §14.1 | ⬜ Ready | |
+| MOD-A01g | First provider adapter — OpenAI chat-completions protocol, covering hosted and local endpoints | §14.1, ADP-5 | ✅ Qualified | `pkg/inference/openai`, 19 tests; O1–O10 stated, security invariants mutation-verified; **18 pass / 0 fail / 0 inconclusive / 0 skipped** on the shared conformance suite |
 | MOD-A01h | Provider credential boundary | INV-2, SDD §10 | ✅ Qualified | `pkg/inference/credential.go`, `TestCredentialResistsAccidentalDisclosure` |
 | MOD-A01i | Gateway streaming pipeline: S1–S10 protocol, cancellation, backpressure, stall abandonment | SDD §10 | ✅ Qualified | `pkg/gateway/streaming.go`, 16 protocol tests + `stream_terminal_contract` conformance case |
 | MOD-A01j | Canonical event emission, written atomically with the metadata | INV-5, R-EVT-04, OEV-1 | ✅ Qualified | `pkg/gateway/events.go`, 9 assertions |
 | MOD-A01k | Provider egress allowlist enforced in-process; no-filesystem-mounts remains deployment-level | SDD §10 | ✅ Qualified | `pkg/gateway/egress.go`, 22 assertions incl. metadata-endpoint and DNS-rebind suites |
+
+**MOD-A01g provider adapter (O1–O10)**
+
+One adapter covers hosted providers speaking the OpenAI chat-completions protocol and the local
+endpoints — Ollama, vLLM, LM Studio — that reimplement it. They differ in what they support, not in
+how they are addressed, and capability records already carry the difference (§14.2), so a second
+adapter would only duplicate the translation.
+
+| # | Invariant |
+|---|---|
+| O1 | The adapter never builds its own HTTP client; egress control belongs to the caller's transport |
+| O2 | A credential reaches the Authorization header and nothing else |
+| O3 | Every provider failure maps to a stable Modbit code, carrying no upstream body content |
+| O4 | A capability gap is a refusal or a declared Loss, never a silent drop |
+| O5 | A stream closes exactly once and carries exactly one terminal event |
+| O6 | Cancellation abandons the request rather than draining it |
+| O7 | A tool call round-trips: id, name, and arguments survive both translations |
+| O8 | Media is never inlined without a resolver; without one the part is refused |
+| O9 | A token count says whether it is exact or estimated |
+| O10 | The observed model revision comes from the response, never from the request |
+
+**The shared conformance suite earned its keep.** MOD-A01e was built against a fake adapter, which
+only proved the suite worked. Run against the first real adapter over real HTTP, it failed
+`content_types` immediately — and it was right. See decision 124.
+
+| # | Decision | Rationale |
+|---|---|---|
+| 121 | The HTTP client is a **required** constructor argument | MOD-A01k puts the egress allowlist in the adapter's own transport. A client the adapter built for itself would carry `http.DefaultTransport` and reach any host the process can: the allowlist would still be configured, still be tested, and no longer be in the path. Requiring it means the guard cannot be dropped by omission — it has to be removed deliberately. |
+| 122 | An egress refusal is unwrapped back to its policy denial | `net/http` wraps a `RoundTrip` error in a `*url.Error`, which would read as a transport failure. The gateway fails over on retryable classes, so a misclassified denial costs an attempt against a destination that is blocked by definition. |
+| 123 | The credential travels in the Authorization header only | A URL is logged by proxies, servers, and Go's own error strings, so a credential in a query parameter is a credential in somebody's log. The upstream error body is drained and discarded for the same reason: provider errors routinely echo the request, including the prompt and occasionally the rejected key. |
+| 124 | An unsupported **modality** is a refusal, not a declared Loss | This shipped as a Loss and the conformance suite rejected it. Omitting an image is not a degraded answer, it is an answer to a different question: a user asking what is wrong in a screenshot gets fluent prose about the accompanying text, and the completion looks entirely successful. The Loss would have been recorded truthfully and read by nobody in time. Routing should never send an image to a model without vision, which is precisely why the adapter must hold the line when it happens. |
+| 125 | `MediaResolver` is a collaborator, and its absence is a refusal | The IR carries references and never bytes (decision 2), but the protocol needs the bytes, so somebody must fetch them. Making it an explicit port keeps the fetch visible; refusing without one keeps a prompt from being sent with its image quietly missing. |
+| 126 | Streamed tool-call fragments accumulate **by index** | The protocol sends the id and name once and the arguments across many fragments. Anything else hands the harness two half-formed calls whose arguments parse as nothing. |
+| 127 | Cached and reasoning tokens are **subtracted** from their totals | The protocol reports them as subsets of `prompt_tokens` and `completion_tokens`; the canonical `Usage` keeps all four separate and sums them. Not subtracting bills a cached call twice for the same tokens. |
+| 128 | `stream_options.include_usage` is always requested | Without it most implementations stream deltas and never report token counts, leaving every streamed call unbillable — a budget that silently does not apply to streaming is not a budget. |
+| 129 | Terminal delivery is one bounded blocking send, shared by both exit paths | Written first as a non-blocking send with a `default:` arm, which drops the terminal event whenever the consumer is briefly busy and closes the channel with nothing. That is B-7 in the gateway, found there by a drain helper enforcing S4. The same trap is one line away in every adapter that streams, so the `drain` helper came across with it. |
+| 130 | A text-only message sends a **string**, not a one-element array | Several local implementations reject the array form. This is the difference between working against Ollama and not, and it is invisible until a local endpoint is the thing under test. |
 
 **MOD-A01e — conformance suite design**
 
