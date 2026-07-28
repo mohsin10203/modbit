@@ -92,6 +92,10 @@ tests:
   - pkg/index:TestWatcherStopsOnCancellationAndClosesTheSourceOnce
   - pkg/index:TestWatcherSurfacesAnApplyFailureInsteadOfContinuing
   - pkg/index:TestPollSourceDrivesAWatcherEndToEnd
+  # The shared ChangeSource suite every platform backend must pass (CTX-A01c3–c5), and the check
+  # that it can actually fail.
+  - pkg/index:TestPollSourceIsConformant
+  - pkg/index:TestSecurityChangeSourceConformanceDetectsALeakedReader
   # Lexical channel (CTX-A01d).
   - pkg/index:TestSecurityLexicalResultsNeverCrossRevisions
   - pkg/index:TestSecurityOnlyIndexableContentCanBeChunked

@@ -284,6 +284,7 @@ the contract against it, and let the engine decision be its own ADR. That gave `
 | CTX-A01b | Hierarchical ignore discovery over a real tree (walking `.gitignore`/`.modbitignore`/`.modbitindexingignore` per directory) | §20A.10 | ✅ Qualified | `pkg/index/walk.go`, 19 tests incl. 4 security suites |
 | CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | ✅ Qualified | `pkg/index/reindex.go` + `watch.go`, 29 tests. Reindex engine, scoped rescan, flush policy, and the watcher loop are complete; native backends are tracked separately as CTX-A01c3–c5 |
 | CTX-A01c2 | `ChangeSource` port + `Watcher` driver + portable `PollSource`, incl. queue-overflow → `Rescan` | CTX-2 | ✅ Qualified | `pkg/index/watch.go`, 12 tests; W1–W8 mutation-verified |
+| CTX-A01c2b | Shared `ChangeSource` conformance suite (D1–D8) | CTX-2 | ✅ Qualified | `pkg/index/conformance`; `PollSource` is its first subject, 6 mutants caught. **CTX-A01c3–c5 must each pass it** — see below |
 | CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | ⬜ Ready | Recursive, one watch per tree. The only backend that meets CTX-2 on a large tree on the primary developer platform — see the watcher dependency finding below |
 | CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
@@ -396,6 +397,29 @@ were mutation-verified.
 | 96 | A scan or apply failure **returns** from `Run` | A loop that retried quietly would report a fresh index while diverging from the tree — the silent degradation R-ERR-05 and SDD §15 both forbid. The caller decides whether to restart, because only the caller knows whether a failing walk is transient. |
 | 97 | A source that stops flushes what it already has | A watcher shutting down is not a reason to discard edits the user already made. |
 | 98 | `PollSource` declares itself on every batch | It cannot observe individual changes, so every batch is a `Rescan` carrying `poll_interval`. Presenting a rebuild as an update would hide that this deployment has no native watcher — and it is the floor, not the target: a full walk does not meet CTX-2 on a large tree. |
+
+**CTX-A01c2b — W1–W8 test the Watcher, not the sources**
+
+W1–W8 drive the `Watcher` from a *fake* source. They prove the loop reacts correctly to a well-behaved
+source and prove nothing about whether a real one is well-behaved. Three backends are pending —
+FSEvents, inotify, ReadDirectoryChangesW — and they are precisely where a channel that never closes
+or a `Close` that deadlocks would live, because that is what wrapping an OS notification API is like.
+
+`pkg/index/conformance` states the port's obligations once, as D1–D8, and `PollSource` is its first
+subject rather than its owner. D7 (delta batches carry changes) is **Skipped** for `PollSource`,
+which only ever rescans — Skipped is not Pass, and a delta path that was never exercised has not been
+shown to work.
+
+Six mutants of `PollSource` are caught, each by the invariant that owns it: a loop that never closes
+the channel (D2, D8), a non-idempotent `Close` (D3), `Changes` handing out a fresh channel per call
+(D1), a rescan reason outside the declared set (D5), and a rescan batch that also carries changes
+(D6).
+
+**The suite had the defect it exists to catch.** A source whose `Close` blocks made the *test binary*
+hang and time out — D4 detects exactly that, but D1, D2 and D3 all call `Close` first and deadlocked
+before D4 ran. In CI that is a timeout with no attribution, which is worse than a named failure.
+Every `Close` the suite performs is now bounded, so a blocking `Close` is reported by D2, D3 and D4
+together instead of hanging the run.
 
 **CTX-A01d2 — measured before proposing an engine (ADR-0102, ADR-0103)**
 
