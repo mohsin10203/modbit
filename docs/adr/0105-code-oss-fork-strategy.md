@@ -6,10 +6,15 @@
 - **Supersedes:** none
 - **Resolves:** the fork/rebase half of `IDE-A01`, which gates `IDE-A02`–`A05` and `BRS-A01`
 
-> **This ADR is analysis, not measurement.** No TypeScript exists in this repository and Code OSS has
-> not been built here. Every other ADR in this directory rests on numbers taken on this machine; this
-> one rests on the document pack and on how upstream-derivative maintenance is known to fail. It says
-> so plainly, and it names the one measurement that has to happen before it is accepted.
+> **Was analysis; now partly measured.** This ADR originally rested on the document pack and on how
+> upstream-derivative maintenance is known to fail, and it named the one measurement it needed: the
+> IDE-1..IDE-15 classification. That measurement was taken on 2026-07-30 against the real API surface
+> — `vscode.d.ts` and the 176 proposed `.d.ts` files at `microsoft/vscode@main` — and is recorded
+> below. It changed the answer: **one likely core patch, not the handful feared**, because three of
+> the four doubtful cases are proposed APIs, which cost a Code OSS derivative nothing at rebase time.
+>
+> Still not measured: whether IDE-9 genuinely requires a patch, which needs a source-level spike
+> rather than a header-level one. No Code OSS checkout exists in this repository.
 
 ## Context
 
@@ -68,6 +73,12 @@ have a licensing problem, not a technical one. The PRD resolved this; it is not 
    why the extension API cannot reach it. A patch with no requirement is deleted, not carried.
 4. **The patch surface is gated.** The count of upstream files touched is the number that predicts
    rebase cost, so it is measured on every build and has a ceiling. Raising the ceiling is an ADR.
+   The measurement below puts the **initial ceiling at 5 touched upstream files**, with IDE-9 the
+   only requirement expected to spend against it.
+5. **Proposed APIs are preferred over patches, and pinned.** They are the third option the original
+   framing missed. A proposed API is upstream-maintained and costs nothing at rebase; it changes
+   without deprecation, so the upstream version is pinned and re-checked on every bump. That is a
+   version-pinning cost, not a merge cost, and it is the cheaper of the two by a wide margin.
 
 Point 4 is the one that makes the difference between this and a hard fork. Every derivative that
 ended up unmaintainable got there by accepting individually reasonable patches, and the honest defence
@@ -75,22 +86,62 @@ is not discipline — it is a number that has to be argued up. The repository al
 itself: `QA-A01c` gates PRD §8A.3's budgets and marks each one enforced or a known gap, and the
 startup targets (<3 s warm, <6 s cold) are release gates that belong in the same harness.
 
-## The measurement this needs before acceptance
+## The measurement (taken 2026-07-30)
 
-**Classify IDE-1 through IDE-15 into "extension API suffices" and "core patch required."**
+**This section was the ADR's stated gap. It is now measured**, against the actual API surface rather
+than recollection: `src/vscode-dts/vscode.d.ts` at `microsoft/vscode@main` — 21,235 lines — plus the
+176 `vscode.proposed.*.d.ts` files in the same directory. Every claim below cites a symbol that
+exists or an absence verified by grep over that file set.
 
-That single classification determines the patch surface, and the patch surface determines the entire
-maintenance cost of the strategy. Choosing between the options above without it is choosing on
-temperament. The uncertain ones are known in advance:
+### The finding that changes the answer
 
-- **IDE-1** (inline Tab: multi-line, fill-in-the-middle, next-edit, partial-accept) — the inline
-  completion API covers some of this; partial-accept and next-edit are where it may not reach.
-- **IDE-9** (diff zones with per-hunk accept/reject) — rendering inside the editor, not beside it.
-- **IDE-4** (selected editor *and terminal* text into context, automatically and visibly) — terminal
-  selection access is the narrower API.
-- **IDE-12** (multiple agents in isolated worktrees) — likely a window/workspace-service concern.
+The four doubtful cases were framed as "extension API or core patch". That framing was **wrong**,
+and the third category is where three of them actually land:
 
-A spike answering those four decides it. Until then this ADR is a position, not a finding.
+| | Available to a marketplace extension | Available to Modbit |
+|---|---|---|
+| **Stable API** | yes | yes |
+| **Proposed API** | **no** — Microsoft permits proposed APIs only for built-in extensions | **yes** — Modbit ships its own derivative and controls `--enable-proposed-api` |
+| **Core patch** | n/a | yes, at rebase cost |
+
+Modbit is not publishing to Microsoft's marketplace (PRD §6, §24.1 — Open VSX), and it builds its own
+Workbench. **A proposed API therefore costs nothing at rebase time**: it is an upstream-maintained
+`.d.ts`, not a patch to upstream source. It carries a different risk — proposed APIs change without
+deprecation — but that is a version-pinning problem, not a merge-conflict problem.
+
+### The four doubtful cases, resolved
+
+| Req | Verdict | Evidence |
+|---|---|---|
+| **IDE-1** multi-line / FIM | **stable** | `InlineCompletionItemProvider` (`vscode.d.ts:5233`), `registerInlineCompletionItemProvider` (`:14862`), `InlineCompletionList` (`:5255`) |
+| **IDE-1** partial-accept (PACC-1/2) | **proposed** | `handleDidPartiallyAcceptCompletionItem(item, info: PartialAcceptInfo)` — `vscode.proposed.inlineCompletionsAdditions.d.ts:123`. Absent from stable, confirmed by grep. |
+| **IDE-1** next-edit | **proposed** | same file: `isInlineEdit`, `showRange`, `displayLocation`, `showInlineEditMenu` |
+| **IDE-4** terminal selection | **proposed** | `Terminal.selection: string \| undefined` — `vscode.proposed.terminalSelection.d.ts:14`. Absent from stable. |
+| **IDE-9** in-editor diff zones | **core patch, probably** | Stable offers `TextEditorDecorationType` and `WorkspaceEdit` (`:3969`), which render *decorations*, not an accept/reject-per-hunk zone. No proposed API provides one; `mappedEditsProvider` is about computing edits, not presenting them. This is the one genuinely likely patch. |
+| **IDE-12** isolated worktrees | **no patch needed** | A worktree is a separate folder, so this is one window per `workspaceFolder` plus process isolation Modbit already owns. `pkg/index/worktree.go` (CTX-A01g) is the hard part and it is done. |
+
+### What that means for the patch budget
+
+**One likely core patch, not fifteen.** IDE-9 is the only requirement with no stable and no proposed
+route. IDE-2, IDE-3, IDE-5, IDE-6, IDE-7, IDE-8, IDE-10, IDE-11, IDE-13, IDE-14 are ordinary
+extension work over stable APIs (`WebviewView`, `ViewColumn`, `scm`/`SourceControl` at `:16580`,
+tree views, status bar, commands); IDE-15 (voice) is explicitly optional and not a completion
+dependency.
+
+So the overlay recommendation stands, and the number that predicts its cost is now measured rather
+than feared. **The initial patch ceiling should be small — 5 touched upstream files — and IDE-9 is
+what the first patches are expected to spend it on.**
+
+### What is still not measured
+
+- **Whether IDE-9 truly needs a patch.** No proposed API supplies an in-editor accept/reject zone,
+  but Copilot-style inline editing exists upstream, so the mechanism is in the tree even if it is not
+  exposed. Confirming that means reading `src/vs/workbench/contrib/` rather than the `.d.ts`, which
+  is a deeper spike than this one.
+- **Proposed-API churn.** These carry no compatibility promise. The cost is a pinned upstream version
+  and a re-check per bump — real, ongoing, and cheaper than a patch.
+- **Nothing has been built.** No Code OSS checkout exists in this repository; this is a
+  classification of the API surface, not a working overlay.
 
 ## Consequences
 

@@ -230,7 +230,7 @@ PRD §6.1. Docket §3.
 
 | ID | Task | Status |
 |---|---|---|
-| IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed — ADR-0105 covers the fork/rebase half; **should be split**, only that half is architecturally binding |
+| IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed — ADR-0105 covers the fork/rebase half and its **IDE-1..IDE-15 measurement is now taken** (2026-07-30, against `vscode.d.ts` + 176 proposed `.d.ts` at `microsoft/vscode@main`): **one likely core patch (IDE-9), not the handful feared**, because partial-accept, next-edit and terminal selection are all *proposed* APIs — free to a derivative, unavailable to a marketplace extension. Initial patch ceiling 5 files. **Should still be split**; only the fork/rebase half is architecturally binding |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | ✅ Qualified — every sub-item a–c complete; sync is SET-C01 (Phase 4) |
 | CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**, and macOS and Linux both select a native change source (`c3`/`c4`, ADR-0104 and ADR-0106 Accepted); what remains is four native backends behind ports that already exist and are tested (`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
