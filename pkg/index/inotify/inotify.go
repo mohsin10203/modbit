@@ -71,8 +71,20 @@ const newDirectoryFileCap = 1024
 
 // Source is a Linux ChangeSource.
 type Source struct {
-	root    string
-	file    *os.File
+	root string
+	file *os.File
+	// fd is the same descriptor os.File owns, kept as an integer for InotifyAddWatch.
+	//
+	// It is *not* obtained from file.Fd(), which is not an accessor: for a non-blocking file — which
+	// this one is, deliberately — `Fd` calls `SetBlocking` before returning (os/file_unix.go), whose
+	// own comment is "any blocking operation will tie up a thread". Since `addWatch` runs during New,
+	// that would clear O_NONBLOCK before the reader goroutine ever starts.
+	//
+	// Honest limit on that reasoning: **no test distinguishes the two**. D1–D9 pass either way, under
+	// -race, on arm64 and amd64. So this avoids a documented hazard rather than fixing an observed
+	// defect, and the suite does not currently prove which it is. os.File remains the owner; nothing
+	// closes this integer directly.
+	fd      int
 	changes chan index.ChangeBatch
 	stop    chan struct{}
 	closeOn sync.Once
@@ -108,9 +120,11 @@ func New(root string) (*Source, error) {
 			WithDetail("field", "root")
 	}
 
-	// IN_NONBLOCK is what makes the descriptor pollable, which is what lets os.File hand it to the
-	// runtime poller. That in turn is what makes Close interrupt a blocked Read (D4, D8) — without
-	// it the reader parks in the kernel and no amount of channel signalling reaches it.
+	// IN_NONBLOCK is what lets os.NewFile return a pollable File (os/file_unix.go documents exactly
+	// that), which is the intended basis for Close interrupting a parked Read — D4, D8 and D9.
+	//
+	// "Intended" is doing real work in that sentence: those cases also pass with the descriptor in
+	// blocking mode, so they do not currently prove the mechanism they rest on. See the `fd` field.
 	fd, err := syscall.InotifyInit1(syscall.IN_CLOEXEC | syscall.IN_NONBLOCK)
 	if err != nil {
 		return nil, modberr.Wrap(err, modberr.CodeInternal, "the platform change stream could not be started")
@@ -119,6 +133,7 @@ func New(root string) (*Source, error) {
 	s := &Source{
 		root:    resolved,
 		file:    os.NewFile(uintptr(fd), "inotify"),
+		fd:      fd,
 		changes: make(chan index.ChangeBatch),
 		stop:    make(chan struct{}),
 		watches: map[int32]string{},
@@ -157,7 +172,7 @@ func (s *Source) watchTree(dir string) error {
 }
 
 func (s *Source) addWatch(dir string) error {
-	wd, err := syscall.InotifyAddWatch(int(s.file.Fd()), dir, eventMask)
+	wd, err := syscall.InotifyAddWatch(s.fd, dir, eventMask)
 	if err != nil {
 		if errors.Is(err, syscall.ENOSPC) {
 			// The kernel's per-user watch limit. At construction this is recoverable by the caller —
