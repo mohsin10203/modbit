@@ -73,9 +73,12 @@ is a walk.
 directory created afterwards adds its own watch. Two consequences had to be decided rather than
 inherited:
 
-- **Watch descriptors are a budget.** `fs.inotify.max_user_watches` is commonly 8192 on desktop
-  distributions and 524288 or more where it has been raised. A tree with more directories than the
-  remaining budget cannot be watched at all.
+- **Watch descriptors are a budget**, though a larger one than this ADR first claimed. It originally
+  said `fs.inotify.max_user_watches` is "commonly 8192 on desktop distributions". That was written
+  from memory and is **wrong**: the kernel derives the default from available memory rather than
+  using a fixed constant. Measured on stock Ubuntu 24.04.4 (kernel 6.17, 8 GB): **62593**. A tree
+  with more directories than the remaining budget still cannot be watched, but the budget scales with
+  the machine and the fallback is correspondingly rarer than stated here at acceptance.
 - **A new directory is populated before its watch can exist.** Anything written between `mkdir` and
   `inotify_add_watch` produces no event. The window is small and a `git checkout` lands inside it
   routinely.

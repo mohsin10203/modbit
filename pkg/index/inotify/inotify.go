@@ -21,9 +21,10 @@
 //
 // inotify is **not recursive**. One watch covers one directory, so the tree is walked at startup and
 // every directory created afterwards adds a watch. That makes watch descriptors a budget: the kernel
-// caps them per user at `fs.inotify.max_user_watches`, commonly 8192 on desktop distributions and
-// often 524288 on developer machines that have raised it. Exhaustion is reported, never absorbed —
-// see the two ENOSPC paths below, which differ because only one of them can still fall back.
+// caps them per user at `fs.inotify.max_user_watches`, which the kernel derives from available
+// memory rather than fixing at a constant — 62593 measured on stock Ubuntu 24.04 with 8 GB.
+// Exhaustion is reported, never absorbed: see the two ENOSPC paths below, which differ because only
+// one of them can still fall back.
 package inotify
 
 import (

@@ -238,7 +238,7 @@ PRD §6.1. Docket §3.
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
 | AGT-A01 | Local agent — Ask/Plan/Code, typed tools, events, checkpoints, steering, worktree, completion contract | ✅ Qualified — every sub-item a–d complete; see AGT-A01 breakdown below |
-| EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | 🚧 In Progress — contract, suite, portable backend, and macOS confinement Qualified (EXE-A01a/b); Linux and container backends remain |
+| EXE-A01 | Native local sandbox — backend contract, filesystem/network/resource controls, conformance | 🚧 In Progress — contract, suite, portable backend, and macOS confinement Qualified (EXE-A01a/b); Linux and container backends remain, with the Linux capability map now measured rather than assumed (ADR-0107) |
 | IDE-A05 | Diff zones — per hunk/file/group, checkpoint comparison, artifact link | ⬜ Proposed |
 | BRS-A01 | Local preview browser — server detection, element selection, console errors, screenshot, origin policy | ⬜ Proposed |
 ### CTX-A01 breakdown
@@ -1091,7 +1091,7 @@ packages.
 |---|---|---|---|---|
 | EXE-A01a | Backend contract, SBX-5 conformance suite, portable process backend | SBX-1..SBX-6, EXE-7, EXE-9 | ✅ Qualified | `pkg/sandbox`, 13 tests; X1–X8 mutation-verified. Qualified on macOS-only evidence until 2026-07-29, when the first Linux run found cancellation reaching one PID instead of the process group (B-23) |
 | EXE-A01b | Native macOS backend (Seatbelt) | EXE-4, EXE-6 | ✅ Qualified | `pkg/sandbox/seatbelt_darwin.go`, 5 tests; ADR-0101. Enforces filesystem scope and network deny; SBX-5 suite 6 pass / 0 inconclusive |
-| EXE-A01c | Native Linux backend (namespaces + seccomp) | EXE-4, EXE-5, EXE-6 | ⬜ Ready | Achievable via `syscall` without a dependency; cgroup v2 for EXE-5 |
+| EXE-A01c | Native Linux backend (namespaces + seccomp) | EXE-4, EXE-5, EXE-6 | ⬜ Ready — **capability map measured, ADR-0107** | Achievable via `syscall` without a dependency. Measured unprivileged on stock Ubuntu 24.04 (kernel 6.17): `network_deny`, `cpu_limit`, `memory_limit`, `process_limit`, `process_confinement` all **enforceable**; `filesystem_scope` is **not** — `apparmor_restrict_unprivileged_userns=1` leaves a userns with `CapEff=0`, so `mount`/`chroot` are denied. Five enforced controls against Seatbelt's two, missing the one Seatbelt leads with |
 | EXE-A01d | Container and microVM backends | SBX-1, SBX-4 | ⬜ Proposed | ADR-0100 open decision 4 (microVM technology) |
 
 **EXE-A01b macOS confinement (ADR-0101)**
