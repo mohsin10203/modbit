@@ -1,4 +1,4 @@
-//go:build !darwin || !cgo
+//go:build !linux && (!darwin || !cgo)
 
 package changesource_test
 
@@ -10,9 +10,10 @@ import (
 
 // A platform with no native backend polls, and says so.
 //
-// CTX-2. The fallback is correct here — there is nothing else to select until CTX-A01c4 and c5 land
-// — but it is not free, and a caller that cannot tell it is polling cannot explain why the index
-// lags. The pairing is what matters: the source works, and the selection admits what it costs.
+// CTX-2. This is Windows until CTX-A01c5 lands, and a `CGO_ENABLED=0` macOS build. The fallback is
+// correct on those — there is nothing else to select — but it is not free, and a caller that cannot
+// tell it is polling cannot explain why the index lags. The pairing is what matters: the source
+// works, and the selection admits what it costs.
 func TestAPlatformWithNoNativeBackendPolls(t *testing.T) {
 	source, selection, err := changesource.Open(t.TempDir(), changesource.Options{})
 	if err != nil {

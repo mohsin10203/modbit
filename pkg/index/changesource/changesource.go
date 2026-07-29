@@ -24,6 +24,7 @@ import (
 
 	"github.com/modbit/modbit/pkg/index"
 	"github.com/modbit/modbit/pkg/index/fsevents"
+	"github.com/modbit/modbit/pkg/index/inotify"
 	"github.com/modbit/modbit/pkg/modberr"
 )
 
@@ -33,6 +34,8 @@ type Backend string
 const (
 	// BackendFSEvents is the macOS native source (ADR-0104).
 	BackendFSEvents Backend = "fsevents"
+	// BackendInotify is the Linux native source (ADR-0106).
+	BackendInotify Backend = "inotify"
 	// BackendPoll is the portable source. Every batch it delivers is a full rescan.
 	BackendPoll Backend = "poll"
 )
@@ -89,18 +92,54 @@ func Open(root string, opts Options) (index.ChangeSource, Selection, error) {
 // that could not substitute a constructor could only ever cover one of them.
 type nativeConstructor func(root string, latency time.Duration) (index.ChangeSource, Backend, error)
 
+// candidate is one platform backend and the name it reports.
+type candidate struct {
+	backend Backend
+	open    func(root string, latency time.Duration) (index.ChangeSource, error)
+}
+
+// nativeCandidates are tried in order. At most one is available on any platform — the others are
+// compiled as stubs that refuse with MODBIT_CAPABILITY_UNAVAILABLE — so the order is documentation
+// rather than precedence. CTX-A01c5 adds ReadDirectoryChangesW as a third entry and changes nothing
+// else here.
+var nativeCandidates = []candidate{
+	{BackendFSEvents, func(root string, latency time.Duration) (index.ChangeSource, error) {
+		s, err := fsevents.New(root, latency)
+		if err != nil {
+			// Returning s alongside the error would hand back a non-nil interface holding a nil
+			// *fsevents.Source, and every `source != nil` check downstream would pass.
+			return nil, err
+		}
+		return s, nil
+	}},
+	{BackendInotify, func(root string, _ time.Duration) (index.ChangeSource, error) {
+		// inotify has no batching window to tune: the kernel delivers per event, and coalescing is
+		// the Watcher's flush policy rather than the source's.
+		s, err := inotify.New(root)
+		if err != nil {
+			return nil, err
+		}
+		return s, nil
+	}},
+}
+
 // nativeSource builds the native backend for this platform.
 //
-// It is one backend today. CTX-A01c4 (inotify) and CTX-A01c5 (ReadDirectoryChangesW) extend it, and
-// each arrives with its own Backend name and its own build tags inside its own package.
+// A candidate that reports MODBIT_CAPABILITY_UNAVAILABLE is not this platform's backend, and the
+// search continues. Any other error stops it: that candidate *is* this platform's backend and it
+// failed, which is a fault to surface rather than a reason to try something else.
 func nativeSource(root string, latency time.Duration) (index.ChangeSource, Backend, error) {
-	s, err := fsevents.New(root, latency)
-	if err != nil {
-		// Returning s alongside the error would hand back a non-nil interface holding a nil
-		// *fsevents.Source, and every `source != nil` check downstream would pass.
-		return nil, BackendFSEvents, err
+	for _, c := range nativeCandidates {
+		source, err := c.open(root, latency)
+		if err == nil {
+			return source, c.backend, nil
+		}
+		if !modberr.Is(err, modberr.CodeCapabilityUnavailable) {
+			return nil, c.backend, err
+		}
 	}
-	return s, BackendFSEvents, nil
+	return nil, "", modberr.New(modberr.CodeCapabilityUnavailable,
+		"no native change source is available on this platform")
 }
 
 func open(root string, opts Options, newNative nativeConstructor) (index.ChangeSource, Selection, error) {

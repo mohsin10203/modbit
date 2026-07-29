@@ -233,7 +233,7 @@ PRD §6.1. Docket §3.
 | IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed — ADR-0105 covers the fork/rebase half; **should be split**, only that half is architecturally binding |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | ✅ Qualified — every sub-item a–c complete; sync is SET-C01 (Phase 4) |
-| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**, and macOS now selects a native change source (`c3`, ADR-0104 Accepted); what remains is five native backends behind ports that already exist and are tested (`c4`, `c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
+| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**, and macOS and Linux both select a native change source (`c3`/`c4`, ADR-0104 and ADR-0106 Accepted); what remains is four native backends behind ports that already exist and are tested (`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
@@ -287,7 +287,7 @@ the contract against it, and let the engine decision be its own ADR. That gave `
 | CTX-A01c2b | Shared `ChangeSource` conformance suite (D1–D9) | CTX-2 | ✅ Qualified | `pkg/index/conformance`; `PollSource` and FSEvents are its subjects, 11 mutants caught across both. D9 (goroutine release) was added because FSEvents exposed a leak D1–D8 could not see |
 | CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | ✅ Qualified | `pkg/index/fsevents`, cgo, **no new module**. Passes D1–D9 and is the first source to exercise D7. 49 ms median notification vs CTX-2's 10 s. ADR-0104 **Accepted** |
 | CTX-A01c3b | Backend selection — `changesource.Open`, fallback policy, degraded reporting | CTX-2 | ✅ Qualified | `pkg/index/changesource`, 11 tests; S1–S7 mutation-verified. macOS gets FSEvents without asking; every other build polls and reports itself degraded. Only `MODBIT_CAPABILITY_UNAVAILABLE` falls back — a native backend that fails to start surfaces its error rather than degrading into a 2 m 45 s freshness floor |
-| CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
+| CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ✅ Qualified | `pkg/index/inotify`, **stdlib `syscall`, no module and no cgo**. Passes D1–D9 incl. D7; 7 tests, I1–I5/I7 mutation-verified, I6 documented as structural. 42 µs median notification. ADR-0106 **Accepted**. `fsnotify` was not needed after all — the port had already replaced its portability layer |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
 | CTX-A01d3 | Early termination (MaxScore) and top-k selection in the in-process index | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`; L9 mutation-verified against an exhaustive reference (5 of 7 mutants caught, 2 documented). 75.5→40.9 ms on the realistic query, 182→119 ms on corpus-wide terms |
@@ -541,6 +541,33 @@ were invisible while FSEvents sat unselected:
 The selector carries no build tags of its own — it calls the backend and reads
 `MODBIT_CAPABILITY_UNAVAILABLE` — so one set of tests covers it with cgo on and off, and `c4`/`c5`
 each reduce to a package, a line in `nativeSource`, and a build-tag flip in two tests.
+
+**CTX-A01c4 — the prediction held, and `fsnotify` was not needed (ADR-0106)**
+
+`c4` cost one package, one entry in a candidate table, and one selection test. That is what the
+selector was built for, and it is the first evidence that the shape generalises rather than just
+fitting the backend it was written against.
+
+Two things were decided rather than inherited, both consequences of inotify not being recursive:
+
+- **`ENOSPC` is handled twice, differently.** At construction the kernel watch limit yields
+  `MODBIT_CAPABILITY_UNAVAILABLE`, so the selector degrades to polling and *says so* — worse, but
+  complete. Adding a watch mid-run yields `RescanQueueOverflow`, because by then there is nobody left
+  to fall back to and the only honest report is that the source cannot describe what it missed. The
+  fallback policy written for `c3` is what makes the first case work unchanged.
+- **A new directory is adopted by walking it.** Anything written between `mkdir` and
+  `inotify_add_watch` produces no event at all, and `git checkout` lands in that window routinely. The
+  source watches *and* enumerates, capped at 1024 files before it asks for a rescan instead.
+
+**The overflow contract is proven against the kernel here.** ADR-0104 could only provoke FSEvents'
+*own* bounded queue; `MustScanSubDirs` remained unexercised. inotify's real signal is reachable — the
+reader parks in `send` when nothing consumes, stops draining the descriptor, and the kernel fills
+`max_queued_events` and sets `IN_Q_OVERFLOW`. Seven mutants, six caught; I6 (the path-escape guard)
+is structurally unreachable and recorded as such rather than counted.
+
+`go.mod` still holds **one** direct dependency after seven capabilities and two native backends, and
+this backend adds no cgo either — so `CGO_ENABLED=0` gets a real watcher on Linux where macOS gets
+the fallback.
 
 **D9 exists because FSEvents exposed a leak D1–D8 could not see.** Removing the stop guard from the
 source's send loop survived every case: `Close` still returns promptly, because it never waited for

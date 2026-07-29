@@ -105,9 +105,22 @@ tests:
   # The overflow path the suite leaves Skipped for this source: loss must be reported as a rescan,
   # never dropped, or the index is left confidently wrong.
   - pkg/index/fsevents:TestABurstThatOutrunsTheSourceBecomesARescan
+  # Native Linux backend (CTX-A01c4, ADR-0106). stdlib syscall, no module and no cgo. inotify is not
+  # recursive, so the adoption case — a directory populated before its watch could exist — is a race
+  # FSEvents does not have and this backend has to close by walking what it adopts.
+  - pkg/index/inotify:TestInotifySourceIsConformant
+  - pkg/index/inotify:TestAWriteIsReportedRelativeToTheWatchedRoot
+  - pkg/index/inotify:TestADeletedFileIsReportedAsRemoved
+  - pkg/index/inotify:TestANewDirectoryIsAdoptedWithTheFilesAlreadyInIt
+  - pkg/index/inotify:TestSecurityAnUnwatchableRootIsRefused
+  - pkg/index/inotify:TestSecurityChangesAreConfinedToTheWatchedRoot
+  # The kernel's own overflow signal, which ADR-0104 could not provoke for FSEvents and this backend
+  # can: loss must be reported as a rescan, never dropped.
+  - pkg/index/inotify:TestABurstThatOutrunsTheSourceBecomesARescan
   # Backend selection (CTX-A01c3, ADR-0104). The backend tests prove each implementation; these
   # prove what a caller receives, and that a caller can tell a watched tree from a polled one.
   - pkg/index/changesource:TestMacOSSelectsTheNativeBackendByDefault
+  - pkg/index/changesource:TestLinuxSelectsInotifyWhenTheWatchBudgetAllows
   - pkg/index/changesource:TestAPlatformWithNoNativeBackendPolls
   - pkg/index/changesource:TestTheSelectedSourceIsConformant
   - pkg/index/changesource:TestSecurityAnUnwatchableRootIsRefusedOnEveryPlatform

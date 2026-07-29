@@ -137,7 +137,7 @@ func TestEveryPollSelectionIsReportedAsDegraded(t *testing.T) {
 		if selection.Reason == "" {
 			t.Fatalf("a degraded selection carries no reason; an operator cannot act on that")
 		}
-	case changesource.BackendFSEvents:
+	case changesource.BackendFSEvents, changesource.BackendInotify:
 		if selection.Degraded {
 			t.Fatalf("a native selection reported Degraded = true")
 		}
