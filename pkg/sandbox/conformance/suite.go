@@ -281,14 +281,79 @@ func (r *runner) checkSymlinkEscape(ctx context.Context) {
 	r.record(area, StatusPass, "")
 }
 
+// checkProcessEscape verifies that a descendant cannot outlive the run that started it.
+//
+// This was Inconclusive until `LinuxBackend` became the first backend to claim the control, on the
+// same principle the network probe records: the suite refusing to pass an undemonstrated claim is
+// what forces the probe to exist.
+//
+// The property is the one B-23 violated. A command spawns a **background** child and returns
+// immediately; the parent is therefore gone while the descendant is still alive. A backend that
+// confines processes takes the whole tree with it — a process group signalled as a group, or a PID
+// namespace whose init has exited. One that only stops the process it started leaves an orphan
+// running with a workspace handle, which is a run that has ended still doing work.
+//
+// The marker file is what makes it observable: it is written only if the descendant survives its
+// grace period, so its absence is evidence rather than the absence of evidence.
 func (r *runner) checkProcessEscape(ctx context.Context) {
 	const area = AreaProcessEscape
 	if !r.claims(sandbox.ControlProcessConfinement) {
 		r.record(area, StatusSkipped, "backend does not claim enforced process confinement")
 		return
 	}
-	r.record(area, StatusInconclusive,
-		"the suite has no portable probe for process escape; a backend claiming this control must supply one")
+
+	shell := probeShell()
+	if shell == "" {
+		r.record(area, StatusInconclusive, "no probe available on this platform")
+		return
+	}
+	dir, cleanup, err := r.workspace()
+	if err != nil {
+		r.record(area, StatusInconclusive, "workspace could not be created")
+		return
+	}
+	defer cleanup()
+
+	session, err := r.establish(ctx, dir)
+	if err != nil {
+		r.record(area, StatusInconclusive, "sandbox could not be established")
+		return
+	}
+
+	const grace = 2 * time.Second
+	marker := filepath.Join(dir, "escaped.marker")
+	callCtx, cancel := context.WithTimeout(ctx, r.opts.CommandTimeout)
+	defer cancel()
+
+	// The shell exits at once; the subshell sleeps past the grace period and then writes.
+	if _, err := r.backend.Run(callCtx, session, sandbox.Command{
+		Path: shell,
+		Args: []string{"-c", "( sleep 4; touch '" + marker + "' ) >/dev/null 2>&1 & echo started"},
+	}); err != nil {
+		_ = r.backend.Cleanup(ctx, session)
+		r.record(area, StatusInconclusive, "the escape probe could not be run")
+		return
+	}
+
+	// Cleanup is the moment the run ends. Anything still alive afterwards has outlived it.
+	if err := r.backend.Cleanup(ctx, session); err != nil {
+		r.record(area, StatusInconclusive, "cleanup failed, so survival cannot be attributed")
+		return
+	}
+
+	select {
+	case <-time.After(grace + 3*time.Second):
+	case <-ctx.Done():
+		r.record(area, StatusInconclusive, "the probe was cancelled before its grace period elapsed")
+		return
+	}
+
+	if _, err := os.Stat(marker); err == nil {
+		r.record(area, StatusFail,
+			"a descendant outlived the session and wrote to the workspace after cleanup")
+		return
+	}
+	r.record(area, StatusPass, "")
 }
 
 func (r *runner) checkNetworkDeny(ctx context.Context) {

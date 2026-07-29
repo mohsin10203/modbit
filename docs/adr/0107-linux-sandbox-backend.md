@@ -1,11 +1,11 @@
 # ADR-0107 — Linux sandbox: what an unprivileged process can actually enforce
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-30
 - **Owner:** Execution
 - **Supersedes:** none
-- **Resolves:** the capability-map half of `EXE-A01c`. The backend is not built; this fixes what it
-  may declare.
+- **Resolves:** `EXE-A01c`. Built as specified in `pkg/sandbox/linux.go`: the capability map is
+  probed at construction rather than declared, and `filesystem_scope` is never raised.
 
 > **This ADR is measurement, and the measurement contradicted the design it was going to justify.**
 > Every number below was taken on a stock Ubuntu 24.04.4 VM (kernel 6.17, `Standard_D2ns_v6`,
@@ -102,6 +102,23 @@ rather than a routing one, and it is the mechanism `EXE-A01d` will need.
   `EXE-A01d` buys on Linux, and this ADR is the argument for it.
 - Raising `filesystem_scope` to enforced on Linux requires either a privileged helper, a distro
   where the AppArmor restriction is off, or `EXE-A01d`. None is in `EXE-A01c`'s scope.
+
+## What building it added to the suite
+
+`LinuxBackend` is the first backend to claim `process_confinement` as **enforced**, and SBX-5's
+`process_escape` area had no probe — it recorded Inconclusive with the note that "a backend claiming
+this control must supply one". X8 then refused the backend as production-ready, which is the gate
+working: an unexercised claim is not a pass.
+
+The probe now exists, and the property it tests is the one **B-23** violated. A command spawns a
+background descendant and returns immediately, so the parent is gone while the child is still alive;
+after `Cleanup`, a marker the descendant would write must not appear. A backend that takes the whole
+tree with it passes; one that stops only the process it started leaves an orphan holding a workspace
+handle, which is a run that has ended still doing work.
+
+Mutation-verified: claiming the control while omitting `CLONE_NEWPID` from the applied flags turns
+the area from pass to **fail**. This is the same sequence the network-deny probe went through — the
+suite refusing to pass an undemonstrated claim is what forces a probe into existence.
 
 ## Not measured
 

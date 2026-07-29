@@ -307,9 +307,15 @@ func TestCancellationReachesDescendantsNotJustTheChild(t *testing.T) {
 	result, _ := backend.Run(ctx, session, sandbox.Command{
 		Path: "/bin/sh", Args: []string{"-c", "sleep 30 & wait"},
 	})
-	// Generous against the 150 ms deadline and the 2 s WaitDelay backstop, but far below the 30 s a
-	// surviving descendant costs — the failure this separates is an order of magnitude wide.
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
+	// 10 s against a 150 ms deadline and a 2 s WaitDelay backstop, and far below the 30 s a surviving
+	// descendant costs — the failure this separates is an order of magnitude wide, so the bound buys
+	// tolerance without weakening the assertion.
+	//
+	// It was 5 s, which left under 3 s of headroom. `make check` failed once on a machine also running
+	// container builds and did not reproduce in 18 subsequent runs; the detail was lost to a truncated
+	// pipe, so this is the most plausible candidate rather than a confirmed cause. A wall-clock bound
+	// that can fail under CPU contention is a flaky gate either way (B-12), and 10 s costs nothing.
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
 		t.Fatalf("a cancelled command with a background descendant took %v to stop", elapsed)
 	}
 	if !result.TimedOut {
@@ -339,7 +345,9 @@ func TestCancellationStopsACommandAndReportsIt(t *testing.T) {
 	result, _ := backend.Run(ctx, session, sandbox.Command{
 		Path: "/bin/sh", Args: []string{"-c", "sleep 30"},
 	})
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
+	// 10 s for the reason given on the descendant case above: the same CPU-contention exposure, and
+	// the same order-of-magnitude gap between a cancelled command and a 30 s one.
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
 		t.Fatalf("a cancelled command took %v to stop", elapsed)
 	}
 	if !result.TimedOut {

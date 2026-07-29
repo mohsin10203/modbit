@@ -61,4 +61,17 @@ tests:
   - pkg/sandbox:TestSecurityAWorkspacePathCannotInjectProfileRules
   - pkg/sandbox:TestSecuritySeatbeltDoesNotClaimContainerStrength
   - pkg/sandbox:TestSeatbeltPassesTheSharedConformanceSuite
+  # Linux confinement (EXE-A01c, ADR-0107). Build-tagged linux; skipped elsewhere. The capability
+  # map is probed at construction rather than declared, because the sysctl governing user namespaces
+  # is administrator-tunable and cgroup delegation depends on a systemd user session — so these
+  # assert the *relationship* between what is claimed and what is demonstrable, on whatever host
+  # they run. A control claimed is a control re-verified against its own mechanism.
+  - pkg/sandbox:TestLinuxBackendDeclaresOnlyWhatItProbed
+  - pkg/sandbox:TestSecurityLinuxBackendRefusesAnUnenforceableRequirement
+  - pkg/sandbox:TestLinuxBackendPassesTheSharedConformanceSuite
+  # Process escape (SBX-5). Inconclusive in the suite until LinuxBackend became the first backend to
+  # claim enforced process confinement, which is what forced the probe to exist — the same sequence
+  # the network-deny probe went through. Mutation-verified: a backend that claims the control but
+  # does not apply the PID namespace fails this area.
+  - pkg/sandbox:TestCancellationReachesDescendantsNotJustTheChild
   - conformance/execution-sandbox

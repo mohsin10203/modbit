@@ -136,6 +136,28 @@ func (b *ProcessBackend) Establish(ctx context.Context, spec Spec) (*Session, er
 
 // Run implements Backend.
 func (b *ProcessBackend) Run(ctx context.Context, session *Session, cmd Command) (Result, error) {
+	return b.runWith(ctx, session, cmd, nil)
+}
+
+// runWith is Run with a hook that a native backend uses to add isolation to the prepared command.
+//
+// The hook runs after the workspace, environment, hook suppression and process group are set and
+// before the command starts. It exists so `SeatbeltBackend` and `LinuxBackend` add confinement to
+// *this* command rather than assembling their own: EXE-7's environment scrubbing and EXE-9's
+// wall-clock bound are properties of every sandboxed run, and a backend that rebuilt the command
+// would eventually rebuild them differently. The two would then drift apart silently, which is the
+// failure SBX-1's single contract exists to prevent.
+//
+// The hook returns a cleanup that runs once the command has finished, whatever the outcome. That is
+// what owns anything whose lifetime is the *command* rather than the session or the context — the
+// cgroup descriptor `LinuxBackend` passes through `CgroupFD` is the case in point. Tying it to the
+// context instead would leak a descriptor per Run whenever a caller passes `context.Background()`,
+// which the conformance suite does.
+//
+// A hook returning an error aborts before anything is started.
+func (b *ProcessBackend) runWith(
+	ctx context.Context, session *Session, cmd Command, configure func(*exec.Cmd) (func(), error),
+) (Result, error) {
 	if session == nil {
 		return Result{}, modberr.New(modberr.CodeInvalidArgument, "run requires an established session").
 			WithDetail("field", "session")
@@ -172,6 +194,16 @@ func (b *ProcessBackend) Run(ctx context.Context, session *Session, cmd Command)
 
 	var stdout, stderr bytes.Buffer
 	exec.Stdout, exec.Stderr = &stdout, &stderr
+
+	if configure != nil {
+		cleanup, err := configure(exec)
+		if err != nil {
+			return Result{}, err
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
+	}
 
 	started := time.Now()
 	runErr := exec.Run()
