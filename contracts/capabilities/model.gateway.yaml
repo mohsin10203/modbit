@@ -43,6 +43,15 @@ settings:
 tests:
   # First provider adapter (MOD-A01g). The egress and credential boundaries are part of this
   # capability's contract: the adapter is where a leased credential meets a network.
+  # The gateway deployable (SDD SS4.4). INV-2 is why this is a process and not a library: a
+  # pkg/gateway linked into the agent host would put the provider credential in that address space,
+  # and no care inside the library changes which process holds the secret. The credential boundary
+  # is therefore this service's deliverable, and these are its proof. M1-M5 mutation-verified.
+  - services/modbit-model-gateway:TestSecurityACredentialNeverEscapesTheBroker
+  - services/modbit-model-gateway:TestSecurityCredentialsAreScrubbedFromTheEnvironment
+  - services/modbit-model-gateway:TestSecurityAFailedScrubRefusesToStart
+  - services/modbit-model-gateway:TestNoCredentialsFailsClosedAtStartup
+  - services/modbit-model-gateway:TestALeaseExpires
   - pkg/inference/openai:TestSecurityAdapterRefusesToBuildItsOwnHTTPClient
   - pkg/inference/openai:TestSecurityEgressRefusalIsNotReportedAsAnOutage
   - pkg/inference/openai:TestSecurityCredentialTravelsOnlyInTheAuthorizationHeader
