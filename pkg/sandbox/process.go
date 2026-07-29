@@ -41,6 +41,16 @@ type ProcessBackend struct {
 	sessions map[id.ID]*processSession
 }
 
+// processWaitDelay bounds how long Run may block after cancellation has been signalled.
+//
+// It is the backstop behind the process-group kill, not a substitute for it: a descendant that left
+// the group, or one stuck in uninterruptible I/O, still holds the inherited output pipe and would
+// otherwise keep Wait parked for as long as it lives. Two seconds is long enough that a process
+// being killed normally is never cut short, and short enough that a caller's cancellation still
+// means something. Exceeding it costs the tail of that command's output, which is the correct thing
+// to lose when the alternative is not returning.
+const processWaitDelay = 2 * time.Second
+
 type processSession struct {
 	workspace string
 	// ownWorkspace records that this backend created the directory, so cleanup removes only what it

@@ -1,3 +1,5 @@
+//go:build darwin && cgo
+
 #include "shim.h"
 #include <dispatch/dispatch.h>
 #include "_cgo_export.h"

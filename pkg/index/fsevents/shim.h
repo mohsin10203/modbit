@@ -1,3 +1,5 @@
+//go:build darwin && cgo
+
 #ifndef MODBIT_FSEVENTS_SHIM_H
 #define MODBIT_FSEVENTS_SHIM_H
 

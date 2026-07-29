@@ -790,6 +790,7 @@ each invariant was broken in turn and the named test failed.
 
 | # | Bug | Why it mattered | Fix |
 |---|---|---|---|
+| B-22 | `shim.c` and `shim.h` carried **no build constraints**, so `go vet ./...` failed on Linux with cgo enabled | `package .../fsevents: C source files not allowed when not using cgo or SWIG: shim.c`. On a non-darwin build the tags exclude `fsevents.go`, so nothing in the package imports `"C"` — and a `.c` file with no cgo to belong to is an error. `make check` therefore could not pass on any Linux machine, which is every Linux developer and CI's ubuntu leg. `make cross-check` did **not** catch it because it builds with `CGO_ENABLED=0`, the one configuration where `.c` files are ignored entirely; the failing configuration is cgo *enabled* and GOOS not darwin, which nothing ran until the first containerised Linux run. | `//go:build darwin && cgo` on both files. Verified on linux/amd64 with cgo on and off, and on macOS. |
 | B-21 | `make test-conformance` matched `-run Conformance`, which **misses every test that runs a suite against a subject** | The subjects are named `...IsConformant`; only the suites' own self-checks — "can this suite detect a defect" — contain the noun `Conformance`. So R-TST-06's named gate was invoking the meta-tests and skipping the real ones: `TestPollSourceIsConformant`, `TestFSEventsSourceIsConformant`, `TestMemorySequencerIsConformant`, and `TestTheSelectedSourceIsConformant` all reported `[no tests to run]` while the target reported `ok`. `make check` runs them, so nothing was untested — but the gate that exists to name *which* guarantee broke was green on four suites it never ran, which is the same defect class as the Makefile comments that claimed "CI runs it" when no CI existed. Found by reading the target's output rather than its exit code, while qualifying `CTX-A01c3b`. | `-run 'Conformance|Conformant'`. The gate now invokes 10 tests where it invoked 6. |
 
 **CTX-A01g bug fix**
@@ -1061,7 +1062,7 @@ packages.
 
 | ID | Task | Requirements | Status | Evidence |
 |---|---|---|---|---|
-| EXE-A01a | Backend contract, SBX-5 conformance suite, portable process backend | SBX-1..SBX-6, EXE-7, EXE-9 | ✅ Qualified | `pkg/sandbox`, 12 tests; X1–X8 mutation-verified |
+| EXE-A01a | Backend contract, SBX-5 conformance suite, portable process backend | SBX-1..SBX-6, EXE-7, EXE-9 | ✅ Qualified | `pkg/sandbox`, 13 tests; X1–X8 mutation-verified. Qualified on macOS-only evidence until 2026-07-29, when the first Linux run found cancellation reaching one PID instead of the process group (B-23) |
 | EXE-A01b | Native macOS backend (Seatbelt) | EXE-4, EXE-6 | ✅ Qualified | `pkg/sandbox/seatbelt_darwin.go`, 5 tests; ADR-0101. Enforces filesystem scope and network deny; SBX-5 suite 6 pass / 0 inconclusive |
 | EXE-A01c | Native Linux backend (namespaces + seccomp) | EXE-4, EXE-5, EXE-6 | ⬜ Ready | Achievable via `syscall` without a dependency; cgroup v2 for EXE-5 |
 | EXE-A01d | Container and microVM backends | SBX-1, SBX-4 | ⬜ Proposed | ADR-0100 open decision 4 (microVM technology) |
@@ -1102,6 +1103,12 @@ other side.
 | 188 | Reads stay broad; only **writes** are scoped | A build reads toolchains, headers, and libraries from all over the system, and narrowing that is a compatibility project rather than a confinement one. What must not leave is covered by the egress deny and by the classifier deciding what is ever read into an index. |
 | 189 | `(deny network*)` is kept although `(deny default)` already covers it | Measured both ways: deny-default with no network line refuses a connect, and allow-default with only the network line also refuses one. The explicit line is what keeps egress denied if the default is ever loosened for a compatibility reason, and it is labelled so the next reader does not delete it as redundant. |
 | 190 | `Run` delegates to the process backend rather than re-implementing execution | Working-directory resolution, environment replacement, hook suppression, and cancellation stay in one place. A second copy would drift, and the copy that drifted would be the confined one. |
+
+**EXE-A01a bug fix — found by the first Linux run**
+
+| # | Bug | Why it mattered | Fix |
+|---|---|---|---|
+| B-23 | Cancellation killed **one PID, not the process group** — a cancelled command returned after 30 s against a 150 ms deadline | `configureProcessGroup` sets `Setpgid`, and its comment said this let cancellation "reach its descendants". Nothing ever signalled the group: `exec.CommandContext` installs a default cancel that calls `Process.Kill`, which signals the single PID. The shell died, its children kept running, and because they inherited the write end of the output pipe, `Wait` blocked until they exited on their own. A cancelled run whose process tree keeps working is EXE-9's failure mode, and `TestSecurityAnUnexercisedClaimBlocksReadiness` failed with it — the SBX-5 suite scored the portable backend 2 pass / **1 fail**, so the backend could not pass its own declared claims. **Invisible on macOS**: `/bin/sh` there is bash, which execs a lone trailing command, so `sh -c "sleep 30"` is one process and killing one PID is enough. Debian's `/bin/sh` is dash, which forks. EXE-A01a was marked Qualified on macOS-only evidence. | `cmd.Cancel` signals `-pgid`, treating `ESRCH` as the outcome asked for rather than a failure, plus `cmd.WaitDelay` (2 s) as a backstop for a descendant that left the group or is stuck in uninterruptible I/O. `TestCancellationReachesDescendantsNotJustTheChild` uses `sleep 30 & wait` to force a real descendant on **every** platform, so the case is no longer one only Linux can see — it fails at 30 s on macOS against the pre-fix code. |
 
 **EXE-A01a sandbox protocol (X1–X8)**
 

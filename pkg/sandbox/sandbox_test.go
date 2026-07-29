@@ -276,6 +276,47 @@ func TestSecurityHooksAreSuppressed(t *testing.T) {
 	}
 }
 
+// Cancellation must reach the child's descendants, not only the process that was started.
+//
+// This is the case `TestCancellationStopsACommandAndReportsIt` cannot see on macOS. `sh -c "sleep
+// 30"` is one process there, because bash-as-sh execs a lone trailing command, so killing the single
+// PID is enough and the test passes whether or not the group is signalled. Under dash — Debian's
+// /bin/sh, and what CI's Linux leg runs — the shell forks, the grandchild survives a single-PID
+// kill, and because it inherited the output pipe, Wait blocks until it exits on its own.
+//
+// `sleep 30 & wait` forces that shape on every platform: an explicit background child, so there is
+// always a descendant to lose. A command that keeps running after its caller gave up is a leaked
+// process tree, and the `Setpgid` this backend performs exists precisely to make it reachable.
+func TestCancellationReachesDescendantsNotJustTheChild(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+	backend := sandbox.NewProcessBackend()
+	dir := t.TempDir()
+
+	session, err := backend.Establish(context.Background(), testSpec(t, dir))
+	if err != nil {
+		t.Fatalf("Establish: %v", err)
+	}
+	defer func() { _ = backend.Cleanup(context.Background(), session) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	result, _ := backend.Run(ctx, session, sandbox.Command{
+		Path: "/bin/sh", Args: []string{"-c", "sleep 30 & wait"},
+	})
+	// Generous against the 150 ms deadline and the 2 s WaitDelay backstop, but far below the 30 s a
+	// surviving descendant costs — the failure this separates is an order of magnitude wide.
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("a cancelled command with a background descendant took %v to stop", elapsed)
+	}
+	if !result.TimedOut {
+		t.Fatal("a cancelled command was not reported as timed out")
+	}
+}
+
 // A cancelled command must stop promptly and say that it timed out, or a caller cannot tell a
 // timeout from a fast failure.
 func TestCancellationStopsACommandAndReportsIt(t *testing.T) {
