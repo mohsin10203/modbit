@@ -101,10 +101,24 @@ func NewLinuxBackend() (*LinuxBackend, error) {
 	}
 
 	// Resource limits, through the cgroup systemd delegated to this user session.
+	//
+	// Delegation being present is necessary and not sufficient. Placing a child into a cgroup uses
+	// clone3's CLONE_INTO_CGROUP, and that combines with the namespace flags above in ways neither
+	// probe sees on its own: the namespace probes ran with no cgroup, and a filesystem check of the
+	// delegated path runs no command at all. The combination is what production uses, so the
+	// combination is what has to be tried.
 	if parent, delegated := probeCgroupDelegation(); delegated {
 		b.cgroupParent = parent
-		for _, c := range []Control{ControlCPULimit, ControlMemoryLimit, ControlProcessLimit} {
-			controls[c] = EnforcementEnforced
+		if b.probeCombined() {
+			for _, c := range []Control{ControlCPULimit, ControlMemoryLimit, ControlProcessLimit} {
+				controls[c] = EnforcementEnforced
+			}
+		} else {
+			// The cgroup is delegated but unusable alongside the namespaces this host allows. Dropping
+			// it keeps the namespace controls, which were proven on their own, and declines the three
+			// this cannot deliver — rather than claiming seven controls and failing every command,
+			// which is precisely what CI caught twice.
+			b.cgroupParent = ""
 		}
 	}
 
@@ -139,15 +153,18 @@ func identityMapping() ([]syscall.SysProcIDMap, []syscall.SysProcIDMap) {
 		[]syscall.SysProcIDMap{{ContainerID: os.Getgid(), HostID: os.Getgid(), Size: 1}}
 }
 
-// probeNamespace reports whether a command can actually *run* with these clone flags.
+// probeNamespace reports whether a command can actually run with these clone flags, **through this
+// backend's own Run path**.
 //
-// It executes a real binary in a real directory rather than checking that the clone succeeded. The
-// distinction is the whole lesson of the CI failure this replaced: a namespace that is created but
-// cannot execute anything is not a usable control, and a probe that stops at creation certifies a
-// sandbox that fails on its first command.
+// Two CI failures came from probing something other than what runs. The first checked only that the
+// clone succeeded, so it certified a namespace that could not execute anything. The second built its
+// own `exec.Cmd`, which missed everything `runWith` adds before the hook — the process group, the
+// scrubbed environment, the cancellation wiring — so it certified a command that was not the command.
 //
-// It also runs against a mode-0700 directory, because that is what a workspace is, and workspace
-// access is precisely what an unmapped namespace loses.
+// The only way to stop paying that repeatedly is to make the probe use the production path. This
+// establishes a real session on a real mode-0700 workspace and runs a real command through
+// `b.Run`, with `b.namespaces` set to the candidate. If that command exits 0, the control works
+// here; nothing else is evidence.
 func (b *LinuxBackend) probeNamespace(flags uintptr) bool {
 	shell := probeExecutable()
 	if shell == "" {
@@ -158,19 +175,73 @@ func (b *LinuxBackend) probeNamespace(flags uintptr) bool {
 		return false
 	}
 	defer os.RemoveAll(dir)
+	// A workspace is private to its owner, and an unmapped namespace loses exactly that access.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return false
 	}
 
-	uids, gids := identityMapping()
-	cmd := exec.Command(shell, "-c", "exit 0")
-	cmd.Dir = dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags:  flags,
-		UidMappings: uids,
-		GidMappings: gids,
+	// Swap in the candidate for the duration. Construction is single-threaded, so no lock is needed
+	// and none is taken — a mutex here would imply a concurrency that does not exist.
+	saved := b.namespaces
+	b.namespaces = flags
+	defer func() { b.namespaces = saved }()
+
+	ctx := context.Background()
+	session, err := b.process.Establish(ctx, Spec{RunID: id.MustNew(id.Run), Workspace: dir})
+	if err != nil {
+		return false
 	}
-	return cmd.Run() == nil
+	defer func() { _ = b.process.Cleanup(ctx, session) }()
+
+	result, err := b.Run(ctx, session, Command{Path: shell, Args: []string{"-c", "exit 0"}})
+	return err == nil && result.ExitCode == 0 && !result.TimedOut
+}
+
+// probeCombined runs a command with the namespaces *and* the cgroup this backend intends to use.
+//
+// It is the last probe and the only one that exercises the production configuration end to end,
+// including the session cgroup created by Establish and passed through CgroupFD.
+func (b *LinuxBackend) probeCombined() bool {
+	shell := probeExecutable()
+	if shell == "" || b.cgroupParent == "" {
+		return false
+	}
+	dir, err := os.MkdirTemp("", "modbit-cgprobe-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return false
+	}
+
+	ctx := context.Background()
+	session, err := b.process.Establish(ctx, Spec{RunID: id.MustNew(id.Run), Workspace: dir})
+	if err != nil {
+		return false
+	}
+	defer func() { _ = b.process.Cleanup(ctx, session) }()
+
+	// The session cgroup Establish would have made, made here directly so the trial exercises the
+	// same CgroupFD path without depending on this backend's own Establish, whose capabilities are
+	// still being decided.
+	path := filepath.Join(b.cgroupParent, "modbit-probe-"+session.ID.String())
+	if err := os.Mkdir(path, 0o755); err != nil && !os.IsExist(err) {
+		return false
+	}
+	defer func() { _ = os.Remove(path) }()
+
+	b.mu.Lock()
+	b.sessions[session.ID] = path
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.sessions, session.ID)
+		b.mu.Unlock()
+	}()
+
+	result, err := b.Run(ctx, session, Command{Path: shell, Args: []string{"-c", "exit 0"}})
+	return err == nil && result.ExitCode == 0 && !result.TimedOut
 }
 
 // probeExecutable returns a shell the probe can run, or "" when none is present.
