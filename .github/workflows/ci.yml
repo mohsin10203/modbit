@@ -7,6 +7,24 @@
 # than on the author's machine.
 #
 # Every target invoked here has been run locally and passes. Nothing aspirational is wired in.
+#
+# # Why per-push jobs are Linux-only
+#
+# This is a private repository, so Actions minutes are metered, and **macOS runners bill at 10x the
+# Linux rate**. Three macOS jobs on every push consumed roughly 200 charged minutes per run against a
+# 2,000-minute monthly allowance — about ten pushes before CI stops working, which is how the
+# previous account ended up with every job refused.
+#
+# So the fast path is Linux and macOS moved to `macos-gates`, which runs nightly and on demand. That
+# is a real reduction in coverage and it is worth naming rather than burying: FSEvents (ADR-0104) and
+# the Seatbelt backend (ADR-0101) are macOS-only code, and between pushes they are now covered by the
+# nightly run rather than by the gate that blocks a merge. `cross-check` still compiles every target
+# on every push, so a macOS *build* break is caught immediately; a macOS *behaviour* break is caught
+# within a day.
+#
+# The two defects this workflow has actually found -- a missing build constraint on shim.c and a
+# sandbox cancellation that killed one PID instead of the process group -- were both found by the
+# Linux leg, which is the one that stays.
 
 name: ci
 
@@ -30,14 +48,7 @@ jobs:
   # The pre-review gate: format, lint, typecheck, generated-code drift, unit tests, and the three
   # contract gates. This is what `make check` runs, and it is the job that must stay fast.
   check:
-    strategy:
-      fail-fast: false
-      matrix:
-        # Both platforms, because the change sources are build-tagged: macOS compiles and exercises
-        # the FSEvents backend, Linux compiles and exercises its refusing fallback. A single-platform
-        # run would leave one of the two paths untested until a release.
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -62,16 +73,7 @@ jobs:
   # Adversarial and contract suites (R-TST-05, R-TST-06). Separated from `check` so a failure names
   # which kind of guarantee broke rather than reporting "tests failed".
   suites:
-    strategy:
-      fail-fast: false
-      matrix:
-        # Both platforms, for the same reason `check` uses both and one specific to this job:
-        # `TestSecurityAnUnwatchableRootIsRefusedOnEveryPlatform` asserts that the two change-source
-        # backends refuse identical inputs, and a parity claim verified on one platform is not
-        # verified. The `conformance` targets have the matching property — the shared ChangeSource
-        # suite has a different subject on each platform.
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -82,6 +84,29 @@ jobs:
       - run: make test-conformance
       - run: make test-integration
       - run: make test-e2e
+
+  # Everything macOS, on a nightly schedule and on demand rather than per push.
+  #
+  # This is the only place FSEvents (ADR-0104) and the Seatbelt backend (ADR-0101) run at all, and it
+  # is the only place the change-source parity claim gets its second platform:
+  # `TestSecurityAnUnwatchableRootIsRefusedOnEveryPlatform` asserts the backends refuse identical
+  # inputs, and a parity claim verified on one platform is not verified.
+  #
+  # A failure here does not block a merge, which is the cost of metering. It does produce a named
+  # failing run within 24 hours, which is strictly better than the alternative that was actually in
+  # place until yesterday: no CI at all.
+  macos-gates:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make check
+      - run: make test-security
+      - run: make test-conformance
 
   # PRD §8A.3 performance budgets. Scheduled rather than per-push: these are wall-clock p95 budgets,
   # and a shared runner under load reports numbers that say more about the runner than the code — an
