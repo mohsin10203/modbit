@@ -125,49 +125,62 @@ func NewLinuxBackend() (*LinuxBackend, error) {
 	return b, nil
 }
 
-// probeNamespace reports whether a child can be started with these clone flags.
+// identityMapping keeps the child's own uid and gid inside the user namespace.
 //
-// It runs a real process rather than reading a sysctl, because the sysctl that governs this on
-// Ubuntu does not block namespace creation — it strips the namespace's capabilities — and reading it
-// would answer a different question than the one being asked.
-func (b *LinuxBackend) probeNamespace(flags uintptr) bool {
-	cmd := exec.Command("/proc/self/exe")
-	cmd.Args = []string{"modbit-sandbox-probe"}
-	// The probe never execs anything: SysProcAttr is applied by the child between fork and exec, so
-	// a clone failure surfaces as a start error before the binary matters. Pointing at a path that
-	// cannot run keeps the probe from having side effects.
-	cmd.Path = "/nonexistent-modbit-probe"
-	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: flags}
-	err := cmd.Run()
-	// ENOENT means the clone succeeded and the exec then failed, which is the outcome being probed
-	// for. EPERM or EINVAL means the namespace itself was refused.
-	return errorIsExecFailure(err)
+// Without a mapping the child runs as the overflow id — 65534, `nobody` — which cannot enter a
+// workspace created mode 0700 by the invoking user. Every command then fails with EACCES from a
+// sandbox that reported itself healthy, because the namespace really was created; it was simply
+// useless. CI found exactly that, on the first host where all seven controls were available.
+//
+// A single-entry self-map needs no capability, which matters because
+// `apparmor_restrict_unprivileged_userns` leaves the namespace with none.
+func identityMapping() ([]syscall.SysProcIDMap, []syscall.SysProcIDMap) {
+	return []syscall.SysProcIDMap{{ContainerID: os.Getuid(), HostID: os.Getuid(), Size: 1}},
+		[]syscall.SysProcIDMap{{ContainerID: os.Getgid(), HostID: os.Getgid(), Size: 1}}
 }
 
-// errorIsExecFailure distinguishes "the namespace was created and the exec failed" from "the
-// namespace was refused". Only the second means the control is unavailable.
-func errorIsExecFailure(err error) bool {
-	if err == nil {
-		return true
-	}
-	var errno syscall.Errno
-	if e, ok := err.(*os.PathError); ok {
-		if en, ok := e.Err.(syscall.Errno); ok {
-			errno = en
-		}
-	}
-	if e, ok := err.(*exec.Error); ok {
-		if en, ok := e.Err.(syscall.Errno); ok {
-			errno = en
-		}
-	}
-	switch errno {
-	case syscall.ENOENT:
-		return true
-	case syscall.EPERM, syscall.EINVAL, syscall.EACCES:
+// probeNamespace reports whether a command can actually *run* with these clone flags.
+//
+// It executes a real binary in a real directory rather than checking that the clone succeeded. The
+// distinction is the whole lesson of the CI failure this replaced: a namespace that is created but
+// cannot execute anything is not a usable control, and a probe that stops at creation certifies a
+// sandbox that fails on its first command.
+//
+// It also runs against a mode-0700 directory, because that is what a workspace is, and workspace
+// access is precisely what an unmapped namespace loses.
+func (b *LinuxBackend) probeNamespace(flags uintptr) bool {
+	shell := probeExecutable()
+	if shell == "" {
 		return false
 	}
-	return strings.Contains(err.Error(), "no such file or directory")
+	dir, err := os.MkdirTemp("", "modbit-nsprobe-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return false
+	}
+
+	uids, gids := identityMapping()
+	cmd := exec.Command(shell, "-c", "exit 0")
+	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags:  flags,
+		UidMappings: uids,
+		GidMappings: gids,
+	}
+	return cmd.Run() == nil
+}
+
+// probeExecutable returns a shell the probe can run, or "" when none is present.
+func probeExecutable() string {
+	for _, candidate := range []string{"/bin/sh", "/system/bin/sh"} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // probeCgroupDelegation finds the cgroup subtree this user may create children under.
@@ -270,6 +283,10 @@ func (b *LinuxBackend) Run(ctx context.Context, session *Session, cmd Command) (
 				c.SysProcAttr = &syscall.SysProcAttr{}
 			}
 			c.SysProcAttr.Cloneflags |= b.namespaces
+			// The same mapping the probe used. If these differed, the probe would be certifying a
+			// configuration the command never runs under — which is how a sandbox reports itself
+			// healthy and then fails EACCES on everything it is asked to do.
+			c.SysProcAttr.UidMappings, c.SysProcAttr.GidMappings = identityMapping()
 		}
 		if !hasCgroup {
 			return nil, nil
