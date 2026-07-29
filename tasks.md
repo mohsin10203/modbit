@@ -9,7 +9,7 @@
 > **Status values:** `Proposed` → `Ready` → `In Progress` → `Blocked` → `Review` → `Qualified` →
 > `Released`. No task is `Qualified` without Capability Registry and acceptance evidence.
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-07-29
 
 ---
 
@@ -233,7 +233,7 @@ PRD §6.1. Docket §3.
 | IDE-A01 | Code OSS baseline: fork/rebase strategy, branding, update service, process isolation, marketplace, startup/memory telemetry | ⬜ Proposed — ADR-0105 covers the fork/rebase half; **should be split**, only that half is architecturally binding |
 | IDE-A02 | Settings import from VS Code/Cursor with mapping report and rollback | ⬜ Proposed |
 | SET-A01 | Settings Registry core — definition schema, TS/Go generation, scope resolver, UI metadata, local files, validation, change effects | ✅ Qualified — every sub-item a–c complete; sync is SET-C01 (Phase 4) |
-| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**; what remains is six native backends behind ports that already exist and are tested (`c3`–`c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
+| CTX-A01 | Local indexing — ignore/classification, watcher, lexical/vector/symbol, branch/worktree, status, citations | 🚧 In Progress — **every sub-item a–i is Qualified**, and macOS now selects a native change source (`c3`, ADR-0104 Accepted); what remains is five native backends behind ports that already exist and are tested (`c4`, `c5`, `d2`, `e2`, `f2`), each gated on its own ADR |
 | MOD-A01 | Model Gateway v1 — canonical IR, hosted adapter, OpenAI-compatible local endpoint, DLP, metadata, streaming, cost | ✅ Qualified — every sub-item a–k complete; see MOD-A01 breakdown below |
 | IDE-A03 | Tab completion — FIM, multiline, next edit, latency budget, settings, acceptance telemetry | ⬜ Proposed |
 | IDE-A04 | Inline edit — selection/cursor, diff preview, accept/reject/refine, escalation to Code run | ⬜ Proposed |
@@ -285,7 +285,8 @@ the contract against it, and let the engine decision be its own ADR. That gave `
 | CTX-A01c | File watcher and incremental reindex within the freshness SLO | CTX-1, CTX-2 | ✅ Qualified | `pkg/index/reindex.go` + `watch.go`, 29 tests. Reindex engine, scoped rescan, flush policy, and the watcher loop are complete; native backends are tracked separately as CTX-A01c3–c5 |
 | CTX-A01c2 | `ChangeSource` port + `Watcher` driver + portable `PollSource`, incl. queue-overflow → `Rescan` | CTX-2 | ✅ Qualified | `pkg/index/watch.go`, 12 tests; W1–W8 mutation-verified |
 | CTX-A01c2b | Shared `ChangeSource` conformance suite (D1–D9) | CTX-2 | ✅ Qualified | `pkg/index/conformance`; `PollSource` and FSEvents are its subjects, 11 mutants caught across both. D9 (goroutine release) was added because FSEvents exposed a leak D1–D8 could not see |
-| CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | 🚧 Review | `pkg/index/fsevents`, cgo, **no new module**. Passes D1–D9 and is the first source to exercise D7. 49 ms median notification vs CTX-2's 10 s. ADR-0104 (**Proposed**) — nothing selects it yet; making it the macOS default is the open decision |
+| CTX-A01c3 | Native macOS change source (FSEvents) | CTX-2 | ✅ Qualified | `pkg/index/fsevents`, cgo, **no new module**. Passes D1–D9 and is the first source to exercise D7. 49 ms median notification vs CTX-2's 10 s. ADR-0104 **Accepted** |
+| CTX-A01c3b | Backend selection — `changesource.Open`, fallback policy, degraded reporting | CTX-2 | ✅ Qualified | `pkg/index/changesource`, 11 tests; S1–S7 mutation-verified. macOS gets FSEvents without asking; every other build polls and reports itself degraded. Only `MODBIT_CAPABILITY_UNAVAILABLE` falls back — a native backend that fails to start surfaces its error rather than degrading into a 2 m 45 s freshness floor |
 | CTX-A01c4 | Native Linux change source (inotify) | CTX-2 | ⬜ Ready | `fsnotify` is adoptable here; needs a watch per directory and must handle `max_user_watches` exhaustion as `RescanQueueOverflow` |
 | CTX-A01c5 | Native Windows change source (ReadDirectoryChangesW) | CTX-2 | ⬜ Ready | Natively recursive; `fsnotify` is adoptable here |
 | CTX-A01d | Lexical index — `LexicalIndex` port, code-aware tokenizer, in-process BM25, chunker | CTX-5, RET-1 | ✅ Qualified | `pkg/index/lexical.go`, 12 tests; L1–L7 mutation-verified, L8 documented as structural |
@@ -516,6 +517,30 @@ reading, and exactly when a burst is most likely.
 So the property that matters — **loss is reported as a rescan, never dropped** — is now proven for
 this source. A watcher that silently drops changes leaves the index confidently wrong, which is worse
 than one that stops. Only the kernel's own flag path and `RootChanged` remain unexercised.
+
+**CTX-A01c3b — what selecting a backend turned out to decide**
+
+A backend nothing selects is a backend nothing uses, and `pkg/index` cannot import one that imports
+it, so `pkg/index/changesource` is where the choice lives. Writing it surfaced three decisions that
+were invisible while FSEvents sat unselected:
+
+- **Only an unavailable capability falls back.** A backend that exists and did not start returns its
+  error. Falling back on *any* error would trade a fault an operator can act on for a silent
+  freshness floor bounded by a full walk — `QA-A01c` measured 2 m 45 s on a Standard-class
+  repository, against CTX-2's 10 seconds — on the one platform where a native source was chosen to
+  avoid exactly that.
+- **A poll reports itself degraded.** From outside, "the index is stale" and "the index is polled"
+  are one observation. `Selection` is returned rather than logged so a caller can tell them apart,
+  which is the distinction CTX-2 is written in terms of.
+- **The root is validated above both backends.** FSEvents stats and resolves its root; `PollSource`
+  stats nothing and ticks. Left to the backends, a missing directory is an error on macOS and a
+  healthy-looking source everywhere else. The mutation pass makes the point: the mutant that lets a
+  regular file through the shared check is caught **only** on the non-macOS leg, because on macOS
+  the backend refuses it independently. Single-platform CI would have called that test redundant.
+
+The selector carries no build tags of its own — it calls the backend and reads
+`MODBIT_CAPABILITY_UNAVAILABLE` — so one set of tests covers it with cgo on and off, and `c4`/`c5`
+each reduce to a package, a line in `nativeSource`, and a build-tag flip in two tests.
 
 **D9 exists because FSEvents exposed a leak D1–D8 could not see.** Removing the stop guard from the
 source's send loop survived every case: `Close` still returns promptly, because it never waited for
@@ -760,6 +785,12 @@ each invariant was broken in turn and the named test failed.
 | # | Defect | Impact | Fix |
 |---|---|---|---|
 | B-12 | `TestCancellationOnAnAlreadyCompletedStreamIsInconclusive` failed roughly **1 run in 10** | Found by `make check` on unrelated work. The fake's `emit` runs in a goroutine, so a large `StreamBuffer` did not produce "already completed" — whether the terminal event landed before the suite cancelled was a race. The check then reported `pass` instead of `inconclusive`, which is the exact gap the test was written to close (a fast adapter that ignores cancellation shipping as verified). A conformance suite whose verdict depends on goroutine scheduling makes ADP-6 evidence nondeterministic, the same class as B-5. | `fake.CompleteBeforeReturn` emits the whole stream, terminal event included, before `Stream` returns, with the channel sized to the known event count so emitting inline cannot deadlock. Stable over 200 runs and 20 race-enabled suite runs; mutating the check still fails the test. |
+
+**CTX-A01c3b bug fix**
+
+| # | Bug | Why it mattered | Fix |
+|---|---|---|---|
+| B-21 | `make test-conformance` matched `-run Conformance`, which **misses every test that runs a suite against a subject** | The subjects are named `...IsConformant`; only the suites' own self-checks — "can this suite detect a defect" — contain the noun `Conformance`. So R-TST-06's named gate was invoking the meta-tests and skipping the real ones: `TestPollSourceIsConformant`, `TestFSEventsSourceIsConformant`, `TestMemorySequencerIsConformant`, and `TestTheSelectedSourceIsConformant` all reported `[no tests to run]` while the target reported `ok`. `make check` runs them, so nothing was untested — but the gate that exists to name *which* guarantee broke was green on four suites it never ran, which is the same defect class as the Makefile comments that claimed "CI runs it" when no CI existed. Found by reading the target's output rather than its exit code, while qualifying `CTX-A01c3b`. | `-run 'Conformance|Conformant'`. The gate now invokes 10 tests where it invoked 6. |
 
 **CTX-A01g bug fix**
 

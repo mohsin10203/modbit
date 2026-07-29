@@ -105,6 +105,22 @@ tests:
   # The overflow path the suite leaves Skipped for this source: loss must be reported as a rescan,
   # never dropped, or the index is left confidently wrong.
   - pkg/index/fsevents:TestABurstThatOutrunsTheSourceBecomesARescan
+  # Backend selection (CTX-A01c3, ADR-0104). The backend tests prove each implementation; these
+  # prove what a caller receives, and that a caller can tell a watched tree from a polled one.
+  - pkg/index/changesource:TestMacOSSelectsTheNativeBackendByDefault
+  - pkg/index/changesource:TestAPlatformWithNoNativeBackendPolls
+  - pkg/index/changesource:TestTheSelectedSourceIsConformant
+  - pkg/index/changesource:TestSecurityAnUnwatchableRootIsRefusedOnEveryPlatform
+  - pkg/index/changesource:TestEveryPollSelectionIsReportedAsDegraded
+  - pkg/index/changesource:TestForcingThePortableSourceIsHonouredAndStillDegraded
+  # The fallback policy. Its two branches cannot both be provoked on one machine, so they are driven
+  # through a substituted constructor: a build with no backend must degrade, and a backend that
+  # failed to start must not be degraded into silence.
+  - pkg/index/changesource:TestAnUnavailableCapabilityFallsBackToPolling
+  - pkg/index/changesource:TestANativeBackendFailureIsNotMaskedByTheFallback
+  - pkg/index/changesource:TestTheSelectionCarriesTheBackendTheConstructorNamed
+  - pkg/index/changesource:TestTheRootIsValidatedBeforeABackendIsStarted
+  - pkg/index/changesource:TestAFailedNativeConstructorReturnsNoSource
   # The composed pipeline: write -> walk -> classify -> reindex -> index -> search -> cite.
   # Every stage above has its own tests; these assert the promise the stages exist to deliver.
   - pkg/index:TestAFileOnDiskBecomesACitation

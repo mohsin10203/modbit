@@ -1,16 +1,20 @@
 # ADR-0104 — macOS change source: FSEvents via cgo
 
-- **Status:** Proposed
-- **Date:** 2026-07-28
+- **Status:** Accepted
+- **Date:** 2026-07-28 (accepted 2026-07-29)
 - **Owner:** Knowledge
 - **Supersedes:** none
 - **Resolves:** `CTX-A01c3`; the watcher-dependency finding recorded under `CTX-A01c2`
 
-> **What is committed and what is not.** The source is implemented, behind `darwin && cgo` build
-> tags, with a clean fallback and no new module in `go.mod`. Nothing selects it: the watcher still
-> gets `PollSource` unless a caller asks for FSEvents. **Making it the default on macOS is the
-> decision this ADR asks for** — the code exists so the decision can be made against measurements
-> rather than against a proposal.
+> **What is committed.** FSEvents is the macOS backend, and `pkg/index/changesource` is where that
+> takes effect: `Open` returns the native source on macOS and the portable source elsewhere, and
+> reports which one it chose. `TestMacOSSelectsTheNativeBackendByDefault` is the default written as
+> an assertion.
+>
+> **What is not.** No deployable assembles a `Watcher` yet — nothing in the repository outside tests
+> calls `NewWatcher`. So `Open` is the selection point, not a running default; the first component
+> that watches a tree calls it, and gets FSEvents on macOS without asking. That is the whole of the
+> change. See *Selection*, below, for what it does and does not decide.
 
 ## Context
 
@@ -70,6 +74,46 @@ rather than a walk. The stream latency parameter dominates the measurement — 4
 3. **Held to the shared suite.** It passes D1–D9 and is the first source to exercise **D7**: the
    delta path was Skipped everywhere while `PollSource` was the only implementation.
 
+### Selection
+
+`pkg/index` cannot import a backend that imports it, so the choice lives in `pkg/index/changesource`,
+one level down from both. Four things it decides, and one it deliberately does not:
+
+1. **The platform choice is not a build tag here.** The tags already live in the backend, which
+   refuses with `MODBIT_CAPABILITY_UNAVAILABLE` off macOS. The selector asks and reads the answer, so
+   there is one place that knows which platforms have a native source rather than two that can
+   disagree — and `CTX-A01c4`/`c5` add two more backends to keep in step. The consequence worth
+   having is that the selector's own logic compiles and runs identically on every target, so one set
+   of tests covers it on both legs of CI.
+
+2. **Only an unavailable capability falls back.** A backend that exists on this platform and did not
+   start returns its error. This is the load-bearing half of the policy. Falling back on any error
+   would trade a fault an operator can act on — an exhausted resource, a root that moved — for a
+   silent freshness floor bounded by a full walk, which `QA-A01c` measured at 2 m 45 s for a
+   Standard-class repository against CTX-2's 10 seconds. On the one platform where a native source
+   was chosen precisely to avoid that, the machine would look healthy and the index would be minutes
+   behind.
+
+3. **A poll is reported as degraded.** `Selection` is returned, not logged. From outside, "the index
+   is stale" and "the index is polled" are the same observation, and CTX-2 is the promise that they
+   can be told apart. `Reason` distinguishes a configured poll from an unavailable backend, so the
+   diagnostic knob is visible in the report rather than only in its effect.
+
+4. **The root is validated once, above both backends.** FSEvents stats and resolves its root;
+   `PollSource` stats nothing and simply ticks. Left to the backends, a missing directory would be an
+   error on macOS and a healthy-looking source everywhere else — a defect that reproduces on one
+   developer's machine and not another's. The shared gate refuses in the same words on every
+   platform.
+
+What it does not decide is when a `Watcher` exists. Nothing outside tests constructs one yet; the
+selector is the point at which the first one will get FSEvents without asking for it.
+
+The mutation pass on the policy is worth one line, because it names the platform-parity gap this
+section exists to close. Seven mutants, all caught — but the one that lets a regular file through
+the root check is caught **only** on the non-macOS leg, because on macOS `fsevents.New` refuses it
+independently. That is the shared gate doing exactly the job it was added for, and it is only
+visible because CI runs both legs.
+
 ### Dependency cost
 
 **No new module.** CoreServices is a system framework; `go.mod` is unchanged at one dependency. The
@@ -124,7 +168,14 @@ recorded because the next backend author will meet them.
 - `ChangeSource` does not change. `CTX-A01c2` put the contract in front of the platform, and D1–D9
   are what any backend answers.
 - `PollSource` stays. It is the fallback for every non-macOS build until `CTX-A01c4`/`c5` land, and
-  it is what a `CGO_ENABLED=0` build gets.
+  it is what a `CGO_ENABLED=0` build gets. Both selection paths now run under test on every commit —
+  CI's `check` and `suites` jobs each run on macOS and Linux, so the native branch and the fallback
+  branch each have a leg. The `CGO_ENABLED=0` leg was verified locally; CI covers the same code path
+  through Linux.
+- **`CTX-A01c4` and `c5` are now smaller than they look.** Each is a package implementing
+  `ChangeSource`, a line in `nativeSource`, and a build-tag flip in the two selection tests. The
+  fallback policy, the shared root gate, and the degraded reporting are already written and already
+  tested against a substituted backend.
 - **This is the repository's first shipped cgo code**, ahead of ADR-0103's driver decision. It is
   the cheaper precedent — a system framework rather than a third-party module — and it makes the
   per-target build matrix ADR-0103 needs a thing the project requires anyway rather than a cost that
@@ -139,4 +190,8 @@ recorded because the next backend author will meet them.
 - **A large real repository.** Latency was measured on a small synthetic tree. FSEvents costs no
   per-file descriptor, so there is no reason to expect it to degrade with file count, but that is
   an argument rather than a measurement.
-- **The default.** Nothing wires FSEvents into the watcher yet; that is the decision above.
+- **The native failure branch on a real failure.** That a backend error surfaces instead of
+  degrading is proven against a substituted constructor, not against FSEvents actually failing to
+  start. A `FSEventStreamCreate` that returns null cannot be provoked on demand, which is the same
+  limit the kernel's `MustScanSubDirs` runs into. The policy is tested; the specific error reaching
+  it is inferred.

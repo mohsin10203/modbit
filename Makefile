@@ -94,7 +94,11 @@ test-security: ## Adversarial and isolation suites (R-TST-05)
 .PHONY: test-conformance
 test-conformance: ## Shared contract conformance suites (R-TST-06)
 	$(GO) test -race -count=1 ./pkg/inference/conformance/...
-	$(GO) test -race -count=1 -tags=conformance -run Conformance $(GO_PKGS)
+	# Both spellings. `Conformance` alone matched only the suites' self-checks — the tests asking
+	# whether a suite can detect a defect — and missed every case that actually runs a suite against
+	# a subject, because those are named `...IsConformant`. The gate was reporting green on four
+	# suites it never invoked: PollSource, FSEvents, the selected change source, and the sequencer.
+	$(GO) test -race -count=1 -tags=conformance -run 'Conformance|Conformant' $(GO_PKGS)
 
 .PHONY: test-benchmark-smoke
 test-benchmark-smoke: ## Benchmark smoke run, one iteration per benchmark

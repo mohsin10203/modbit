@@ -62,7 +62,16 @@ jobs:
   # Adversarial and contract suites (R-TST-05, R-TST-06). Separated from `check` so a failure names
   # which kind of guarantee broke rather than reporting "tests failed".
   suites:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both platforms, for the same reason `check` uses both and one specific to this job:
+        # `TestSecurityAnUnwatchableRootIsRefusedOnEveryPlatform` asserts that the two change-source
+        # backends refuse identical inputs, and a parity claim verified on one platform is not
+        # verified. The `conformance` targets have the matching property — the shared ChangeSource
+        # suite has a different subject on each platform.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
