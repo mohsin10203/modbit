@@ -106,11 +106,28 @@ func field(msg, name string) error {
 type Disposition string
 
 const (
+	// DispositionNone is the zero value: nobody has judged this finding. Distinct from every other
+	// value, because an unreviewed finding and a dismissed one are opposite states and collapsing
+	// them clears a queue by forgetting it.
+	DispositionNone         Disposition = ""
 	DispositionValid        Disposition = "valid"
 	DispositionInvalid      Disposition = "invalid"
 	DispositionAcceptedRisk Disposition = "accepted_risk"
 	DispositionFixed        Disposition = "fixed"
 )
+
+// Valid reports whether d is one of REV-6's four judgements. The zero value is not one: it means
+// nobody has looked.
+func (d Disposition) Valid() bool {
+	switch d {
+	case DispositionValid, DispositionInvalid, DispositionAcceptedRisk, DispositionFixed:
+		return true
+	}
+	return false
+}
+
+// Judged reports whether anybody has actually looked at this finding.
+func (d Disposition) Judged() bool { return d.Valid() }
 
 // Dismissed reports whether a disposition means the user does not want to see the finding again.
 //

@@ -53,3 +53,29 @@ tests:
   - pkg/review:TestSecuritySameFamilyVerificationIsNotIndependent
   - pkg/review:TestSecurityAnUndeclaredFamilyFailsClosed
   - pkg/review:TestSortIsSeverityFirstAndStable
+  # REV-1's isolation is from the implementation agent's *reasoning*, not its output. The diff is
+  # not hidden state -- a reviewer that cannot see the change cannot review it. What must not cross
+  # is the plan, the scratch notes and the rationale, because a reviewer given those does not review
+  # the change, it evaluates an argument written to be agreed with. That is a different failure from
+  # a reviewer that is simply wrong: it is confidently, specifically wrong in the implementer's own
+  # terms, and its finding-free report reads as corroboration. The three channels are fields on
+  # Context rather than merely absent, so the check can see what it is refusing.
+  - pkg/review:TestSecurityTheImplementersHiddenStateNeverReachesTheReviewer
+  # REV-2. "Low" as a zero value means a change nobody triaged is reviewed as though somebody had
+  # decided it was safe. The classification is an input, because a triage derived from the deep pass
+  # has already spent the cost it existed to avoid.
+  - pkg/review:TestSecurityDeepAnalysisRequiresATriageThatAlreadyHappened
+  # REV-6. An unreviewed finding and a dismissed one are opposite states, and collapsing them clears
+  # a queue by forgetting it.
+  - pkg/review:TestSecurityTheZeroDispositionMeansNobodyLooked
+  # REV-7's "without silently changing user policy" is the requirement. Marking a finding invalid is
+  # a click; changing what a deployment enforces is not. Wire the first to the second and a reviewer
+  # dismissing three noisy findings has turned a rule off for their organization, and nobody decided
+  # that. Asserted at 3 dismissals and at 100.
+  - pkg/review:TestSecurityFeedbackNeverChangesPolicy
+  # Policy can still change -- through an explicit call needing an actor and a reason, so a rule
+  # that stops firing is traceable to somebody who decided it should.
+  - pkg/review:TestAPolicyChangeRequiresAnActorAndAReason
+  # An accepted risk is not a false positive. Feeding it back as one teaches the reviewer to stop
+  # reporting real problems, which is the opposite of what the user meant.
+  - pkg/review:TestSecurityAnAcceptedRiskIsNotAFalsePositive
