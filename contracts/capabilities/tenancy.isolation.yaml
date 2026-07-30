@@ -1,0 +1,46 @@
+# Capability: shared tenant-isolation conformance.
+#
+# R-TEN-06 requires every tenant-scoped surface to have an isolation test, and the obvious reading
+# is "write one per package". That produces as many definitions of isolation as there are packages,
+# and the weakest one is the one that matters. The ChangeSource suite exists for the same reason and
+# found the same thing: stating the contract once is what stopped three backends each inventing
+# their own idea of what Close means.
+#
+# T4 is the case surfaces get wrong. A component can refuse correctly and still leak, because the
+# refusal is where the detail lives -- "run r-7 in org-4 already holds this" is a correct denial and
+# three disclosures. Every package here that got tenancy right got T1-T3 right immediately and
+# needed T4 pointed out, which is why it is a numbered obligation rather than a note.
+
+id: tenancy.isolation
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - rules-R-TEN-01
+  - rules-R-TEN-04
+  - rules-R-TEN-06
+  - PRD-v5.1-§5-INV-10
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: required
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # Two real subjects answering the same five obligations: the overlap detector, whose refusal is a
+  # policy denial, and shard composition, whose isolation is a per-shard grant. One suite covering
+  # two different shapes of isolation is the point.
+  - pkg/tenancy/conformance:TestSecurityTenantScopedSurfacesAreIsolated
+  # The suite must be able to fail, or it certifies whatever it is given. Two subjects prove it: one
+  # with no isolation at all, and one that refuses correctly while naming the tenant it refused on
+  # behalf of.
+  - pkg/tenancy/conformance:TestSecurityTheSuiteDetectsALeakySurface
+  - pkg/tenancy/conformance:TestSecurityTheSuiteDetectsADisclosingRefusal
