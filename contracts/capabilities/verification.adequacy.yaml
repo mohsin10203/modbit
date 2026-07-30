@@ -1,0 +1,53 @@
+# Capability: verification adequacy and flaky-test quarantine.
+#
+# PRD §11B states the reason in its opening line: "Verification currently proves that checks ran.
+# v5.1 additionally requires proving that the checks are capable of failing." A green suite is
+# evidence that nothing broke or that nothing was checked, and those are indistinguishable from
+# outside. This capability is what separates them.
+#
+# Two distinctions carry the whole thing, and both are the same shape: inconclusive is not a failure,
+# and it is not a pass. A signal nobody computed and a signal that came back bad need different
+# responses. Flaky evidence needs a third response again -- VAD-5 says never `passed`, and failing
+# would tell an agent to fix code that may be correct.
+
+id: verification.adequacy
+version: 1
+owner: quality
+security_class: high
+
+requirements:
+  - PRD-v5.1-§11B-VAD-1
+  - PRD-v5.1-§11B-VAD-2
+  - PRD-v5.1-§11B-VAD-5
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # VAD-2. The gate exists only where policy sets a threshold, and where it is set it is absolute.
+  - pkg/adequacy:TestWithNoThresholdTheClaimIsNotGated
+  - pkg/adequacy:TestSecurityASignalBelowTheThresholdDoesNotPass
+  # VAD-1, and the direction that actually matters: a signal nobody computed must never read as a
+  # measurement, or a suite nobody assessed clears a threshold nobody applied.
+  - pkg/adequacy:TestSecurityAMissingSignalIsInconclusiveAndDoesNotPass
+  - pkg/adequacy:TestSecurityAPerfectScoreOverATinyPopulationIsInconclusive
+  - pkg/adequacy:TestTheStrongestSignalDecidesNotTheMostFavourable
+  - pkg/adequacy:TestAMalformedMeasurementIsRefused
+  - pkg/adequacy:TestAnAssessmentShortOfAdequateExplainsItself
+  # VAD-5. Inconsistent evidence is inconclusive, never passed -- and consistent failure is not
+  # flakiness, because the test is telling the truth and quarantining it would hide a real break.
+  - pkg/adequacy:TestSecurityInconsistentResultsAreInconclusiveNeverPassed
+  - pkg/adequacy:TestConsistentFailureIsNotFlaky
+  - pkg/adequacy:TestSecurityDisagreementAcrossRevisionsIsNotFlakiness
+  - pkg/adequacy:TestTooFewRunsCannotEstablishStability
+  - pkg/adequacy:TestAnObservationWithoutARevisionIsRefused
+  - pkg/adequacy:TestQuarantineNamesWhatItWithholds
