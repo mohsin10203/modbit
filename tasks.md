@@ -1468,7 +1468,7 @@ PRD §6.3. Docket §5. Includes v5.1 families **LRN** and **CRC**.
 | EXT-C01 | Registry and marketplace | ⬜ Proposed |
 | DEP-C01 | Team server Helm/Terraform | ⬜ Proposed |
 | QA-C01 | Multi-tenant qualification | ⬜ Proposed |
-| LRN-01..08 | Tiered memory and learning | ⬜ Proposed |
+| LRN-01..08 | Tiered memory and learning | 🚧 In Progress — **MEM-1..MEM-6 promotion rules Qualified**: `pkg/memory`, 9 tests, M1–M9 invariants, seven mutants caught. Tier O/B split, corroboration counted by distinct trajectory rather than occurrence, a policy floor configuration cannot repeal, disabled scopes outranking corroboration, and a manifest that lists what was withheld and why. The tier store, retrieval and canonical rollback events need a durable store (ADR-0103) | ⬜ Proposed |
 | CRC-01..06 | Concurrent-run coordination | 🚧 In Progress — **CRC-1, CRC-2, CRC-5, CRC-6 Qualified**: `pkg/coordination`, 10 tests, K1–K8 invariants, six mutants caught (one survivor exposed a real gap). Symbol and dependency-closure overlap, advisory locks that never block and always expire, and a tenant boundary that refuses a cross-tenant comparison rather than answering it empty. CRC-3 (speculative rebase) needs git; CRC-4 (merge-queue state) needs a source-control provider. **First Phase C item.** | ⬜ Proposed |
 
 ---

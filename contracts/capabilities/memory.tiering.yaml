@@ -1,0 +1,60 @@
+# Capability: tiered memory promotion.
+#
+# MEM-2 states the rule the whole capability exists for: "A single trajectory never changes behavior
+# automatically, preserving PLY-1." One run concluding something is a hypothesis. The same conclusion
+# reached independently by several runs is evidence. Everything else follows from refusing to
+# conflate those.
+#
+# The subtle half is *independent*. Counting corroboration by occurrence rather than by trajectory
+# would let one run that retried three times promote its own guess -- three confirmations from one
+# source, which is the failure this requirement prevents wearing the appearance of the fix.
+#
+# Tier B has no automatic path at any corroboration count. A wrong operational memory fails the next
+# build visibly; a wrong behavioural memory produces confident work that is subtly off, which no
+# test catches. MEM-1 reserves that promotion for human review, so no threshold substitutes.
+
+id: memory.tiering
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§10A.3-MEM-1
+  - PRD-v5.1-§10A.3-MEM-2
+  - PRD-v5.1-§10A.3-MEM-3
+  - PRD-v5.1-§10A.3-MEM-4
+  - PRD-v5.1-§10A.3-MEM-5
+  - PRD-v5.1-§10A.2-MEM-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # MEM-2, both halves. One trajectory never promotes, and five observations of one run are one
+  # trajectory -- the second is the one an occurrence count gets wrong.
+  - pkg/memory:TestSecurityASingleTrajectoryNeverPromotes
+  - pkg/memory:TestSecurityOneRunRepeatingItselfIsOneTrajectory
+  - pkg/memory:TestSecurityPolicyCannotLowerTheCorroborationFloor
+  # MEM-1. Tier B never auto-promotes, and the zero Tier is behavioural so an unclassified memory
+  # cannot reach the automatic path by omission.
+  - pkg/memory:TestSecurityBehaviouralMemoryNeverPromotesAutomatically
+  - pkg/memory:TestSecurityTheZeroTierIsBehavioural
+  # MEM-6 outranks corroboration; MEM-3 wants provenance to source runs *and* evidence, because a
+  # run id alone records that a run agreed without recording why.
+  - pkg/memory:TestSecurityADisabledScopeOutranksCorroboration
+  - pkg/memory:TestMEM3RequiresEvidenceNotJustARunID
+  # MEM-4 prohibits silent application, and the converse matters as much: a memory withheld with no
+  # explanation cannot be told apart from one that was never learned.
+  - pkg/memory:TestSecurityTheManifestShowsWhatWasWithheldAndWhy
+  # MEM-5. Rollback is recorded rather than deleted, so the canonical event has something to
+  # reference and a later re-proposal is recognisable as a return.
+  - pkg/memory:TestRetirementIsRecordedAndStopsApplication
