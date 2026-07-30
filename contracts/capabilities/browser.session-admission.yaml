@@ -1,0 +1,72 @@
+# Capability: browser and desktop automation admission.
+#
+# BRS-2 says credentials are provided through controlled session brokering, and the point of
+# brokering is not that the credential is handled carefully -- it is that the credential never
+# enters the context the model can read. A session that logs in by having the agent type a password
+# into a form has satisfied every word of "controlled" and none of the requirement, because the
+# password was in the agent's context to be typed. So a session carries a broker reference and
+# material is refused (INV-2).
+#
+# BRS-1's isolated profile is keyed on organization, workspace and profile rather than on the
+# caller-supplied profile id, because §35 partitions browser storage by organization and workspace
+# and because "default" is what everything is called. Two tenants both running "default" must not
+# share cookies.
+#
+# BRS-5's quarantine is usually read as malware scanning. It is also INV-13's sibling case: a file
+# the agent downloaded is content from the internet, and releasing it into the workspace makes it
+# indistinguishable from code the user wrote. So Release returns the provenance class, it is always
+# Web, and a refused release does not hand back a trusted one for a caller who ignores the error.
+# The policy check is a flag separate from its findings, because "no findings" and "no scan"
+# produce the same empty list.
+#
+# BRS-6's profile list is deliberately *not* an allowlist: nil means no profiles, not every profile.
+# "Eligible for desktop automation, profile unspecified" is not a state a deployment should reach by
+# omission, which is the opposite of how a nil allowlist reads elsewhere in this codebase -- and the
+# difference is what BRS-6's word "explicit" asks for.
+#
+# Boundary: it drives no browser, opens no page and downloads nothing.
+
+id: browser.session-admission
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§16.6-BRS-1
+  - PRD-v5.1-§16.6-BRS-2
+  - PRD-v5.1-§16.6-BRS-3
+  - PRD-v5.1-§16.6-BRS-4
+  - PRD-v5.1-§16.6-BRS-5
+  - PRD-v5.1-§16.6-BRS-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: equivalent
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # BRS-1 and §35's storage partition, asserted on all three axes plus the resume case.
+  - pkg/browser:TestSecurityProfilesAreIsolatedAcrossOrganizationsAndWorkspaces
+  # BRS-2 and INV-2.
+  - pkg/browser:TestSecurityASessionCarriesBrokerReferencesNeverCredentials
+  # BRS-3's five kinds as a closed set.
+  - pkg/browser:TestTheCaptureKindsAreClosed
+  # BRS-4. A takeover is the moment the audit trail stops describing an agent and starts describing
+  # a person, and a record that cannot say who or when covers neither.
+  - pkg/browser:TestSecurityATakeoverRecordsWhoWhenAndWhy
+  # BRS-5's quarantine, with the unchecked case distinguished from the clean one.
+  - pkg/browser:TestSecurityAnUncheckedDownloadIsNotReleased
+  # BRS-5 as INV-13's sibling: a released download is Web-class, and a refused release yields no
+  # trusted class either.
+  - pkg/browser:TestSecurityAReleasedDownloadCarriesWebProvenance
+  # BRS-6. Includes the stray-empty-entry case, which the list membership check cannot cover and
+  # which would otherwise make the unnamed profile a wildcard.
+  - pkg/browser:TestSecurityDesktopAutomationNeedsAnEnabledWorkerAndAnExplicitProfile
+  - pkg/browser:TestSecurityAWorkerWithNoListedProfilesRunsNothing
