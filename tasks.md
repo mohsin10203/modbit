@@ -1459,7 +1459,7 @@ PRD §6.3. Docket §5. Includes v5.1 families **LRN** and **CRC**.
 | SET-C01 | Settings sync and managed policy | ⬜ Proposed |
 | SEC-C01 | SSO/SCIM/service identities | ⬜ Proposed |
 | AUT-C01 | GitHub/GitLab events | ⬜ Proposed |
-| AUT-C02 | Automation engine | ⬜ Proposed |
+| AUT-C02 | Automation engine | 🚧 In Progress — **AUT-1..AUT-7 admission Qualified**: `pkg/automation`, 8 tests, U1–U8 invariants, seven mutants caught. Declaration completeness checked before anything runs, AUT-5 enforced as no-retry-without-an-idempotency-key for irreversible side effects (keyed off `policy.SideEffectClass`), AUT-4 external mutation gated, and exhausted attempts dead-lettered rather than dropped. The event bus, scheduler and dead-letter store need a durable store (ADR-0103) | ⬜ Proposed |
 | SEC-C02 | Task Secret broker | 🚧 In Progress — **SEC-10..SEC-17 lease contract Qualified**: `pkg/secret`, 9 tests, T1–T9 invariants, seven mutants caught. A lease is a six-coordinate tuple compared whole, with use count and expiry enforced, child inheritance denied by default, revocation idempotent, and the value unreachable through formatting, JSON or audit rendering. The vault/keychain backing store and SEC-5's five-second revocation propagation need a durable store and a worker fleet | ⬜ Proposed |
 | REV-C01 | Full code-review product | ⬜ Proposed |
 | CTX-C01 | Remote/shared indexing | ⬜ Proposed |

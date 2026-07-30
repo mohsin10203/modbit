@@ -1,0 +1,60 @@
+# Capability: automation declaration and trigger admission.
+#
+# AUT-5 is the requirement the package exists for: "Retries must not duplicate irreversible side
+# effects." Retry is what makes an automation reliable and what makes it dangerous, because the
+# failure prompting a retry rarely says whether the side effect landed -- a publish that timed out
+# may have published.
+#
+# So the safe rule is not "retry carefully". An operation that cannot be undone is not retried at
+# all unless something external can prove the second attempt is the same attempt, and that proof is
+# the idempotency key (AUT-2). Without one, a retry of an irreversible operation is simply a second
+# irreversible operation, and no care inside this process changes that.
+#
+# The refusal is terminal rather than deferred, because waiting will not produce a key.
+
+id: automation.admission
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§14-AUT-1
+  - PRD-v5.1-§14-AUT-2
+  - PRD-v5.1-§14-AUT-3
+  - PRD-v5.1-§14-AUT-4
+  - PRD-v5.1-§14-AUT-5
+  - PRD-v5.1-§14-AUT-6
+  - PRD-v5.1-§14-AUT-7
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: required
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # AUT-1, AUT-3, AUT-6. Checked at declaration rather than trigger time: an automation missing its
+  # retry policy is broken when it is written, not at 3am when it first fails. Retry without a
+  # dead-letter state is refused because an exhausted run would simply vanish.
+  - pkg/automation:TestAUT3RequiresEveryDeclaration
+  # AUT-5, all three faces of it: no key means no retry, a first attempt is not a retry, and
+  # reversible or compensatable classes retry freely -- reading it as a general retry ban would
+  # remove the recoverability G12 asks for.
+  - pkg/automation:TestSecurityAnIrreversibleOperationIsNotRetriedWithoutAnIdempotencyKey
+  - pkg/automation:TestAFirstIrreversibleAttemptIsNotARetry
+  - pkg/automation:TestReversibleAndCompensatableOperationsRetryFreely
+  # AUT-4, checked before the retry logic so an automation that was never permitted to mutate is
+  # told that rather than told about idempotency keys.
+  - pkg/automation:TestSecurityExternalMutationRequiresExplicitPolicy
+  # AUT-6 dead-lettering, and the undeclared side-effect class refused for the same reason
+  # pkg/policy refuses it: a caller who forgot to set it must not get the most permissive treatment.
+  - pkg/automation:TestExhaustedAttemptsDeadLetter
+  - pkg/automation:TestSecurityAnUndeclaredSideEffectIsRefused
+  # AUT-7: a run with no source event is unattributable the moment it finishes.
+  - pkg/automation:TestATriggerWithoutASourceEventIsRefused
