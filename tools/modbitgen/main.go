@@ -119,6 +119,21 @@ func run(contractsDir, rootDir, checkOnly string, freezeErrors bool) error {
 				fmt.Printf("  %s\n", pkg)
 			}
 		}
+		cited, total, thin, err := citationCoverage(capCatalog, rootDir)
+		if err != nil {
+			return err
+		}
+		// Printed always, not only when thin. "cited tests verified: ok" reads as completeness,
+		// and the ratio is what says how much of the suite that covers.
+		fmt.Printf("capability-check: citation coverage %d/%d tests (%d%%)\n",
+			cited, total, int(float64(cited)/float64(max(total, 1))*100))
+		if len(thin) > 0 {
+			fmt.Printf("capability-check: %s claimed but under half cited:\n",
+				plural(len(thin), "package"))
+			for _, pkg := range thin {
+				fmt.Printf("  %s\n", pkg)
+			}
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown -check family %q", checkOnly)

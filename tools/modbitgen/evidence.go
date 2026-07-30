@@ -198,6 +198,66 @@ var infrastructurePackages = map[string]string{
 // capability, and the orphan check silent because none of them were named `TestSecurity...`.
 //
 // Reported rather than fatal, for the same reason the security orphan check is.
+// citationCoverage reports how much of each claimed package's test suite the registry actually
+// cites.
+//
+// `unclaimedPackages` asks whether a package is claimed at all, which a single citation satisfies.
+// That is how TNT-3, TNT-4 and TNT-7 went unregistered while `pkg/policy` looked covered: two of its
+// twenty-three tests were cited, so the package was claimed and the gap was invisible. The output
+// then read "cited tests verified: ok", which sounds like completeness and measured something else.
+//
+// This is advisory, not fatal. Plenty of tests legitimately belong to no capability — helpers,
+// internal invariants, table-driven cases behind one cited name — so a low ratio is a prompt to look
+// rather than a defect. What it must not do is stay silent, because a number nobody prints is a
+// number nobody checks.
+func citationCoverage(catalog *capabilityCatalog, root string) (cited, total int, thin []string, err error) {
+	index, err := indexTestFunctions(root)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	citedByPkg := make(map[string]map[string]struct{})
+	for _, cap := range catalog.Capabilities {
+		for _, ref := range cap.Tests {
+			pkg, name, ok := strings.Cut(strings.TrimSpace(ref), ":")
+			if !ok {
+				continue
+			}
+			if citedByPkg[pkg] == nil {
+				citedByPkg[pkg] = make(map[string]struct{})
+			}
+			citedByPkg[pkg][name] = struct{}{}
+		}
+	}
+
+	// thinThreshold is the ratio below which a claimed package is worth looking at, and
+	// thinFloor keeps a package with three tests and one citation off the list — the ratio is
+	// meaningless at that size.
+	const thinThreshold, thinFloor = 0.5, 8
+
+	for pkg, tests := range index {
+		if len(tests) == 0 {
+			continue
+		}
+		if _, skip := infrastructurePackages[pkg]; skip {
+			continue
+		}
+		total += len(tests)
+		hits := 0
+		for name := range tests {
+			if _, ok := citedByPkg[pkg][name]; ok {
+				hits++
+			}
+		}
+		cited += hits
+		if _, claimed := citedByPkg[pkg]; claimed && len(tests) >= thinFloor &&
+			float64(hits)/float64(len(tests)) < thinThreshold {
+			thin = append(thin, fmt.Sprintf("%s %d/%d", pkg, hits, len(tests)))
+		}
+	}
+	sort.Strings(thin)
+	return cited, total, thin, nil
+}
+
 func unclaimedPackages(catalog *capabilityCatalog, root string) ([]string, error) {
 	index, err := indexTestFunctions(root)
 	if err != nil {

@@ -1,0 +1,70 @@
+# Capability: side-effect classification, approval binding, and taint escalation.
+#
+# This capability exists because three requirements had implementations, tests, and no registry
+# entry. TNT-3 (taint as a policy dimension), TNT-4 (the default escalation policy) and TNT-7 (the
+# adversarial suite) were carried by pkg/policy from FND-09 and claimed by nothing, so the evidence
+# gate could not see them. A requirement absent from the registry is unevidenced by the registry's
+# own definition, however well tested the code behind it is.
+#
+# The gap survived because capability-check asks whether a *package* is claimed, not whether a
+# package's tests are. pkg/policy was claimed by taint.declassification through two citations out of
+# twenty-three, so it never appeared as unclaimed. That is the same shape as the conformance gate
+# matching the wrong test names (B-21) and cross-check building only the cgo-disabled half of the
+# matrix (B-22): green for a reason unrelated to the property being claimed.
+
+id: policy.side-effect
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§12.2-SFX-1
+  - PRD-v5.1-§12.2-SFX-2
+  - PRD-v5.1-§12.2-SFX-3
+  - PRD-v5.1-§12.2-SFX-4
+  - PRD-v5.1-§12.2-SFX-5
+  - PRD-v5.1-§12A-TNT-3
+  - PRD-v5.1-§12A-TNT-4
+  - PRD-v5.1-§12A-TNT-7
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # SFX-1: a class is declared before execution, and an undeclared one is denied rather than
+  # assumed benign -- the zero side-effect class must not be the safe one.
+  - pkg/policy:TestUndeclaredSideEffectClassIsDenied
+  - pkg/policy:TestBaseApprovalClassByModeAndSideEffect
+  - pkg/policy:TestEffectAndApprovalClassAgree
+  # SFX-3, SFX-4: approval binds to the operation, and a changed operation invalidates it.
+  - pkg/policy:TestApprovalBindingInvalidation
+  - pkg/policy:TestStaleApprovalIsReportedNotSilentlyIgnored
+  - pkg/policy:TestSatisfiedApprovalResolvesToAllow
+  - pkg/policy:TestUnderpoweredApprovalDoesNotSatisfy
+  - pkg/policy:TestTwoPersonThresholdRaisesButNeverLowers
+  # TNT-3, TNT-4: taint is a policy input, and tainted context escalates externally compensatable
+  # and irreversible operations unless the plan declared them *before* the taint arrived. The
+  # ordering is the whole carve-out: a plan amended after tainted content entered is not a plan.
+  - pkg/policy:TestTaintEscalatesExternalOperations
+  - pkg/policy:TestPlanDeclarationCarveOutDependsOnOrdering
+  - pkg/policy:TestPlanCarveOutCanBeDisabledButNotWidened
+  - pkg/policy:TestEveryEscalationStepIsARealGate
+  - pkg/policy:TestDisablingTaintEnforcementIsRecordedRatherThanSilent
+  # TNT-7: the adversarial suite. Seeded injection attempting high-risk tool use through tainted
+  # context, plus the tool-availability restrictions TNT-3 permits.
+  - pkg/policy:TestSecurityTaintBypassAttemptsAreRefused
+  - pkg/policy:TestDeniedToolIsRefusedRegardlessOfMode
+  - pkg/policy:TestToolOutsideTheAllowlistIsRefused
+  - pkg/policy:TestSinkDenialPrecedesTheApprovalLadder
+  # R-ERR-02 at the policy boundary: a decision is logged, so it must not carry what it inspected.
+  - pkg/policy:TestDecisionCarriesNoSensitiveDetail
+  - pkg/policy:TestKnownSecretIsNotBlockedAtAToolArgument
