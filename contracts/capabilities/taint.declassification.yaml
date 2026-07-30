@@ -29,6 +29,17 @@ settings:
   - taint.declassification.min_role
 
 tests:
+  # The ledger itself (TNT-2). These were passing and unregistered: the propagation record is the
+  # thing an auditor reads, and its copy semantics and immutability are what make it a record rather
+  # than a mutable view.
+  - pkg/taint:TestLedgerRecordsEntriesAndMaintainsTheSet
+  - pkg/taint:TestNewLedgerRequiresARunIdentifier
+  - pkg/taint:TestEntriesAndDeclassificationsAreCopies
+  - pkg/taint:TestFirstEntryTimeIsNotAdvancedByLaterEntries
+  # INV-11 at the declassification boundary: a known secret is not declassifiable by writing a
+  # rationale, and redaction needs verified evidence rather than an assertion that it happened.
+  - pkg/taint:TestKnownSecretCannotBeDeclassifiedByRationale
+  - pkg/taint:TestRedactSecretRequiresVerifiedEvidence
   - pkg/taint:TestDeclassifyRequiresAccountabilityAndLowersRisk
   - conformance/taint-declassification
   - pkg/policy:TestSecurityKnownSecretCannotReachAnExternalSink

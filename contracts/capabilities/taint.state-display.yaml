@@ -32,6 +32,15 @@ settings:
   - taint.unknown_provenance.class
 
 tests:
+  # TNT-6 fail-closed, and the lattice it rests on. Unknown provenance resolving to the highest-risk
+  # class is the invariant; these are the cases that prove it holds through parsing, text round
+  # trips and derivation rather than only at the top-level entry point.
+  - pkg/taint:TestSetTextRoundTripAndUnknownFailsClosed
+  - pkg/taint:TestParseClassAcceptsBothPRDAndContractSpellings
+  - pkg/taint:TestKnownSecretIsTheHighestRiskClass
+  - pkg/taint:TestUnknownProvenanceIsNotClassifiedAsASecret
+  - pkg/taint:TestDeriveFromTrustedInputIsGenerated
+  - pkg/taint:TestSetOperations
   - pkg/taint:TestPropagateInheritsTheHighestRiskContributor
   - pkg/taint:TestUnknownProvenanceFailsClosed
   - pkg/taint:TestDeriveInheritsTaintThroughSummarization
