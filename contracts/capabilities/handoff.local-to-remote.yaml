@@ -1,0 +1,78 @@
+# Capability: local-to-remote task handoff.
+#
+# HND-5 asks that the user see material differences in OS, tools, model policy, network and
+# integrations. The tempting shape is a Disclosure struct the source fills in, and it fails exactly
+# the way a self-labelling worker does: the thing being described gets to describe itself, and the
+# case that matters is the one where it is wrong. A source that has not noticed the target lacks
+# Docker will not disclose that the target lacks Docker. So Differences takes both environments and
+# derives the list, and there is no field anywhere in this package by which a caller asserts that
+# the environments match.
+#
+# Only losses are reported for tools and integrations. Gaining a tool does not change what the task
+# can do, and listing it turns a disclosure the user should read into a diff they will not.
+#
+# HND-3 has two halves and the second is the one that gets lost. Not copying secrets is INV-2.
+# "Separately authorized" means a reference arriving from a trusted local session is still only a
+# name, and the remote decides whether *it* may resolve it -- a handoff carrying resolved values
+# would make the remote's own authorization unreachable.
+#
+# HND-2's unresolved questions are the most droppable item on its list and the most consequential:
+# an agent that resumes without them does not know it is missing anything and answers confidently to
+# a question the user had already flagged as open. The field distinguishes nil ("nobody collected
+# them") from an empty slice ("there are none"), which are different answers.
+#
+# INS-5 permits the manifest to differ and requires the difference to be reported, so a mismatch is
+# a disclosure rather than a refusal -- refusing would push users to work around the check, and the
+# requirement asks for visibility rather than uniformity. A remote reporting *no* manifest is
+# refused, because treating unknown as preserved is the reading that reports nothing.
+#
+# The organization and Space boundaries are not differences to weigh. They are refusals.
+#
+# Boundary: it transfers nothing, resolves no secret and starts no remote run.
+
+id: handoff.local-to-remote
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§20.4-HND-1
+  - PRD-v5.1-§20.4-HND-2
+  - PRD-v5.1-§20.4-HND-3
+  - PRD-v5.1-§20.4-HND-4
+  - PRD-v5.1-§20.4-HND-5
+  - PRD-v5.1-§20.4-HND-6
+  - PRD-v5.1-§14-INS-5
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: equivalent
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # HND-2. Every part, dropped independently.
+  - pkg/handoff:TestSecurityEveryPartOfTheHandoffPayloadIsRequired
+  # HND-3 and INV-2, both halves.
+  - pkg/handoff:TestSecurityAHandoffCarriesSecretReferencesAndNeverMaterial
+  # HND-4. Validated before the move, because a task that has moved cannot be un-moved.
+  - pkg/handoff:TestSecurityAnUnvalidatedTargetRefusesBeforeAnythingMoves
+  # HND-5's derivation, asserted in three directions: losses reported, identical environments
+  # silent, and a richer target not treated as a difference.
+  - pkg/handoff:TestSecurityDifferencesAreDerivedFromBothEnvironments
+  # Each of the five dimensions on its own, with a guard that fails if a dimension has no case.
+  - pkg/handoff:TestSecurityAllFiveDifferenceDimensionsAreCovered
+  # INS-5. Reported rather than dropped, and reported rather than refused.
+  - pkg/handoff:TestSecurityAManifestDifferenceIsReportedNotDropped
+  # HND-6's four forms, and the zero that is not one of them.
+  - pkg/handoff:TestSecurityTheReturnFormIsOneOfFour
+  # INV-10. A boundary, not something a user may approve past.
+  - pkg/handoff:TestSecurityATargetInAnotherOrganizationOrSpaceIsABoundary
+  # nil versus empty, on the field where the distinction changes what the remote agent knows.
+  - pkg/handoff:TestSecurityUnresolvedQuestionsDistinguishNoneFromUncollected
