@@ -1,0 +1,48 @@
+# Capability: client session token issuance and rotation.
+#
+# The substantive rule is what happens when a rotated refresh token comes back.
+#
+# Rotation that merely invalidates the spent token handles the attacker who is late. It does nothing
+# about the attacker who gets there first: then the *client's* next exchange presents an
+# already-rotated token, and a system that only rejects it has told the legitimate user their
+# session ended and told nobody anything else -- while the thief keeps the live credential.
+#
+# A rotated token coming back is proof that two parties hold the same secret, and the exchange
+# cannot say which is which. So the family is revoked. That costs the real user a re-authentication
+# and costs the attacker the session, and it is the only outcome that does not require guessing.
+
+id: session.tokens
+version: 1
+owner: security
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§17.4-client-authentication
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: required
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # The fifteen-minute ceiling, which policy may tighten and may not repeal -- the same shape as
+  # MEM-2's corroboration floor. A configurable maximum with no ceiling satisfies the letter of a
+  # setting while removing the property the requirement exists for.
+  - pkg/session:TestSecurityPolicyCannotExtendTheAccessTTL
+  # Rotation, and the replay response that makes rotation worth having.
+  - pkg/session:TestSecurityASpentRefreshTokenCannotBeReused
+  - pkg/session:TestSecurityAReplayedRefreshTokenRevokesTheFamily
+  # SS17.4 and INV-2: refresh tokens are never available to agents, tools, sandboxes, plugins or MCP
+  # servers. An allowlist, because that exclusion list names today's untrusted surfaces and
+  # tomorrow's would not be on it -- so an unrecognised surface gets the restrictive answer.
+  - pkg/session:TestSecurityUntrustedSurfacesNeverHoldSessionCredentials
+  # An unscoped token grants whatever the endpoint allows, which is the opposite of "scoped".
+  - pkg/session:TestAnUnscopedTokenIsRefused
+  - pkg/session:TestSecurityRevocationIsImmediateAndIdempotent
