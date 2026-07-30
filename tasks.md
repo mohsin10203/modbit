@@ -1464,7 +1464,7 @@ PRD §6.3. Docket §5. Includes v5.1 families **LRN** and **CRC**.
 | REV-C01 | Full code-review product | ⬜ Proposed |
 | CTX-C01 | Remote/shared indexing | ⬜ Proposed |
 | WIKI-C01 | Shared CodeWiki and annotations | ⬜ Proposed |
-| OBS-C01 | Usage/budgets/chargeback | ⬜ Proposed |
+| OBS-C01 | Usage/budgets/chargeback | 🚧 In Progress — **budget admission and ENTL-1..4 Qualified**: `pkg/budget`, 9 tests, B1–B8 invariants, six mutants caught. Three independent gates where an entitlement never overrules policy, nested scopes where every budget must have room, pooled limits summed across the pool, hard-stop-by-default overage, and chargeback tags recorded on refusals too. Metering, alerts and the chargeback export need a durable store (ADR-0103) | ⬜ Proposed |
 | EXT-C01 | Registry and marketplace | ⬜ Proposed |
 | DEP-C01 | Team server Helm/Terraform | ⬜ Proposed |
 | QA-C01 | Multi-tenant qualification | ⬜ Proposed |

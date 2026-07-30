@@ -1,0 +1,61 @@
+# Capability: budget admission and entitlement gating.
+#
+# ENTL-2 makes entitlement, RBAC and policy three separate decisions that must all allow an
+# operation, and the permissive direction is the one worth guarding. Entitlement is the layer a
+# customer pays for, so "they bought it" reads like authority. It is not. A package that let an
+# entitlement overrule a policy denial would turn a billing record into a security decision, which
+# is what PRD SS5 forbids in as many words: seats, entitlements, credits and billing groups "must not
+# change audit records, evidence, security decisions, or technical success metrics".
+#
+# The nesting is the other half. A caller sits inside several budgets at once, so admission needs
+# every one of them to have room -- an organization with headroom does not rescue an exhausted user
+# budget, and the refusal names which scope stopped it because an operator told only "over budget"
+# has to guess which of six to raise.
+
+id: billing.admission
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§21.3-budgets-and-usage-controls
+  - PRD-v5.1-§21.4-ENTL-1
+  - PRD-v5.1-§21.4-ENTL-2
+  - PRD-v5.1-§21.4-ENTL-3
+  - PRD-v5.1-§21.4-ENTL-4
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: required
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # ENTL-2. All three gates, and a refusal that names which one closed -- a plan limit and a
+  # permission problem go to different people.
+  - pkg/budget:TestSecurityAnEntitlementNeverOverrulesPolicy
+  - pkg/budget:TestARefusalNamesTheGate
+  # SS21.3 nesting. Every applicable budget must have room, in both directions, and the exhausted
+  # scope is named.
+  - pkg/budget:TestSecurityABroadBudgetDoesNotRescueATightOne
+  # The zero OverageAction is a hard stop, because an unconfigured overage that let spend through
+  # fails silently, without bound, and first appears on an invoice.
+  - pkg/budget:TestSecurityTheZeroOverageActionIsAHardStop
+  # Approval is a separate act, so an approval-overage decision does not report Allow -- otherwise a
+  # caller proceeds having never obtained one.
+  - pkg/budget:TestSecurityApprovalOverageDoesNotReportAllow
+  # ENTL-3 pooling. Checked individually, three members each well under a shared limit all pass
+  # while together exceeding it, which is the entire failure pooling introduces.
+  - pkg/budget:TestSecurityPooledBudgetsAreSummedNotCheckedIndividually
+  # Currencies are refused rather than compared as bare numbers; there is no conversion here and
+  # inventing one would be inventing a financial control.
+  - pkg/budget:TestSecurityMixedCurrenciesAreRefused
+  # ENTL-4. Attribution of a refused spend is still attribution.
+  - pkg/budget:TestChargebackTagsAreRecordedOnRefusalToo
+  - pkg/budget:TestCostIsComputedFromDeclaredRates
