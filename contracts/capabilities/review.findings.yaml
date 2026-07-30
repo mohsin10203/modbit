@@ -1,0 +1,55 @@
+# Capability: review finding structure, suppression, and verifier independence.
+#
+# Two requirements with a shared shape and one specification gap.
+#
+# REV-3 and REV-5 are structural: a finding carries five parts or it cannot be acted on, and a
+# finding already judged does not come back. The interesting case is the one the obvious reading
+# gets wrong -- `fixed` is not a dismissal. Invalid and accepted-risk say the finding does not
+# matter; fixed says it no longer exists, so seeing it again is news rather than noise.
+#
+# VAD-6 has the gap. It requires the verifier to run on "a different model family" than the
+# implementer, and "model family" appears exactly once in the entire PRD -- in that sentence -- and
+# is never defined. Inferring one from model-id strings would mean deciding two models are related
+# on the strength of a prefix, which is wrong in the direction that matters: shared lineage is
+# exactly what VAD-6 guards against, and a naming convention is not evidence of lineage. So the
+# taxonomy is declared configuration and an undeclared family fails closed.
+
+id: review.findings
+version: 1
+owner: quality
+security_class: high
+
+requirements:
+  - PRD-v5.1-§11-REV-3
+  - PRD-v5.1-§11-REV-5
+  - PRD-v5.1-§11B-VAD-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # REV-3: severity, confidence, location, rationale, evidence. The zero Severity is invalid because
+  # a finding defaulting to low would opt out of the REV-4 check its own severity should trigger.
+  - pkg/review:TestREV3RequiresEveryPart
+  - pkg/review:TestSecurityTheZeroSeverityIsInvalid
+  # REV-5: duplicates and dismissals are suppressed, and what was withheld is reported -- a review
+  # that silently drops findings is indistinguishable from one that found fewer.
+  - pkg/review:TestREV5SuppressesDuplicatesAndReportsThem
+  - pkg/review:TestREV5SuppressesPreviouslyDismissedFindings
+  - pkg/review:TestSecurityAFixedFindingIsNotSuppressed
+  - pkg/review:TestSuppressRefusesAnInvalidFinding
+  # VAD-6: same family is not independence, and an undeclared family is not distinctness. The second
+  # is the one that fails closed, because "nobody said whether these are related" resolving to
+  # "unrelated" produces the verifier that agrees with the implementer for the same wrong reason.
+  - pkg/review:TestSecuritySameFamilyVerificationIsNotIndependent
+  - pkg/review:TestSecurityAnUndeclaredFamilyFailsClosed
+  - pkg/review:TestSortIsSeverityFirstAndStable
