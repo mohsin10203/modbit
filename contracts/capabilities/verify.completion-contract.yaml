@@ -1,0 +1,74 @@
+# Capability: run completion contracts.
+#
+# VER-6 asks a verifier to distinguish four states, and the reason is that the three non-passing
+# ones need different responses. A *failed* verifier found a problem: fix the code. An
+# *inconclusive* one ran and could not decide: fix the check, and treating it as a failure sends
+# somebody hunting a bug that is not there. A *not-run* verifier did not execute: fix the wiring,
+# and it is the non-pass that most resembles success, because a contract iterating over results it
+# never received finds nothing wrong with any of them.
+#
+# So StateNotRun is the zero value, and Evaluate iterates the *contract* rather than the results. A
+# function that iterates the results and checks the ones that arrived is the shape that silently
+# passes a run whose verifier never fired.
+#
+# VER-4's retries are bounded and disclosed. Bounding stops a flaky verifier becoming a pass by
+# attrition; disclosure is the other half, because a pass on the third attempt is a different fact
+# from a pass on the first and reporting only the final state hides exactly the signal that would
+# have caught the flakiness. A satisfied outcome still names what was retried.
+#
+# Two mutants survived the first pass and both were the same class of test error. One removed the
+# inconclusive check from the satisfaction rule and lived because every test asserted against a
+# mixture of blockers -- the three together blocking says nothing about any one of them. The other
+# moved the retry boundary from two attempts to three and lived because the tests used one and
+# three and never two. Each of the three blockers is now asserted alone, and the boundary is
+# asserted at each of 1, 2 and 3.
+#
+# Boundary: it runs no verifier, executes no command and drives no browser.
+
+id: verify.completion-contract
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§8.6-VER-1
+  - PRD-v5.1-§8.6-VER-2
+  - PRD-v5.1-§8.6-VER-3
+  - PRD-v5.1-§8.6-VER-4
+  - PRD-v5.1-§8.6-VER-5
+  - PRD-v5.1-§8.6-VER-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # VER-6. Four states, the zero is not-run, and only passed satisfies.
+  - pkg/verify:TestSecurityOnlyAPassSatisfiesAndTheZeroStateIsNotRun
+  # Reported separately, and each of the three asserted to block on its own.
+  - pkg/verify:TestSecurityTheThreeNonPassesAreNotCollapsed
+  # VER-1. A contract requiring nothing accepts anything.
+  - pkg/verify:TestSecurityAContractRequiringNothingIsRefused
+  # VER-2, each field dropped independently. A timed-out verifier stays distinguishable from one
+  # that exited, because "it finished successfully" is the wrong reading of "we stopped waiting".
+  - pkg/verify:TestSecurityAVerifierThatRanMustCarryItsEvidence
+  # The iterate-the-contract property, plus the duplicate report that would otherwise be resolved
+  # by ordering.
+  - pkg/verify:TestSecurityAVerifierThatReportedNothingIsNotRunRatherThanAbsent
+  # VER-4's bound, including the default a contract gets when it states none.
+  - pkg/verify:TestSecurityAttemptsBeyondTheBoundAreInadmissible
+  # VER-4's disclosure, asserted at the 1/2/3 boundary.
+  - pkg/verify:TestSecurityARetriedPassIsDisclosedOnASatisfiedOutcome
+  # The LCD-3 rule applied to verification: an outcome short of the good one cannot be constructed
+  # without an explanation, so no surface can render a shrug.
+  - pkg/verify:TestSecurityAnInconclusiveOrNotRunResultMustSayWhy
+  # VER-5. "Where supported" is only meaningful if the unsupported case is stated.
+  - pkg/verify:TestTakeoverSupportIsDeclaredPerVerifier

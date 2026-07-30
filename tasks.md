@@ -1428,7 +1428,7 @@ PRD §6.2. Docket §4. Includes v5.1 families **TNT** and **VAD** (docket placem
 |---|---|---|
 | AGT-B01 | Debug workflow | ⬜ Proposed |
 | REV-B01 | Independent review | 🚧 In Progress — **REV-3 and REV-5 Qualified** in `pkg/review` (9 tests, R1–R8, six mutants caught): finding structure, duplicate and dismissal suppression. REV-1 (context isolation), REV-2 (risk classification), REV-4 (independent verification), REV-6/7 (disposition feedback) need the agent run loop |
-| REV-B02 | Verify engine | ⬜ Proposed |
+| REV-B02 | Verify engine | 🚧 In Progress — **VER-1..VER-6 Qualified**: `pkg/verify`, 9 tests, V1–V9 invariants, eighteen mutants caught. VER-6's four states exist because the three non-passes need different responses — failed means fix the code, inconclusive means fix the check, not-run means fix the wiring — so `StateNotRun` is the zero value and `Evaluate` iterates the *contract* rather than the results. Iterating results and checking the ones that arrived is the shape that silently passes a run whose verifier never fired. VER-4's retries are bounded *and* disclosed: a satisfied outcome still names what was retried, because a pass on the third attempt is a different fact from a pass on the first. Two mutants survived the first pass, both the same test error — asserting against a mixture of blockers instead of each alone, and testing attempt counts 1 and 3 but never 2. Remaining: the verifier adapters themselves (test runners, type checkers, browser drivers) and VER-5's interactive session transport |
 | CTX-B01 | Deep graph and history | ⬜ Proposed |
 | CTX-B02 | Fast Context subagent | ⬜ Proposed |
 | WIKI-B01 | CodeWiki generation | ⬜ Proposed |
