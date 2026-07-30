@@ -1,0 +1,54 @@
+# Capability: shard-addressable index partitioning.
+#
+# MRS-4 is the requirement with teeth: "a change confined to one shard MUST NOT force a
+# full-repository rebuild". On an Extreme-class estate a full rebuild is hours, so the gap between
+# rebuilding one shard and rebuilding all of them is the gap between a usable index and a nightly
+# job.
+#
+# The failure mode is what makes this worth testing carefully. Widening the affected set is not a
+# crash and not wrong output -- every shard genuinely does contain the change's repository. It is
+# correct and useless, and indistinguishable from working until the estate is large enough to
+# notice.
+
+id: context.sharding
+version: 1
+owner: knowledge
+security_class: high
+
+requirements:
+  - PRD-v5.1-§8B-MRS-3
+  - PRD-v5.1-§8B-MRS-4
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # A layout is complete and non-overlapping, enforced at construction because both failures are
+  # silent later: an overlap double-rebuilds, a gap loses content nothing reports as missing. A root
+  # shard beside others is refused -- it is a default shard under another name, and a default shard
+  # grows until it is the full rebuild MRS-4 exists to prevent.
+  - pkg/shard:TestALayoutIsValidatedAtConstruction
+  - pkg/shard:TestTheLongestPrefixWins
+  - pkg/shard:TestSecurityAPathInNoShardIsRefused
+  # MRS-4 proper, and the reason an unlocatable path fails the whole plan rather than being skipped:
+  # under-reporting leaves a shard stale, and a stale index is wrong where a slow one is only slow.
+  - pkg/shard:TestSecurityAConfinedChangeAffectsOneShard
+  - pkg/shard:TestSecurityAnUnlocatablePathFailsThePlan
+  # MRS-3 permission filtering. An empty grant permits nothing, and a forbidden shard is omitted
+  # without being named -- an error naming it would let a caller enumerate the layout by probing.
+  - pkg/shard:TestSecurityAnEmptyGrantPermitsNothing
+  - pkg/shard:TestSecurityCompositionOmitsForbiddenShardsSilently
+  - pkg/shard:TestSecurityARefusalDoesNotDiscloseTheLayout
+  # MRS-3 composition. Shards rebuild independently under MRS-4, so differing revisions are the
+  # normal state rather than an exotic one -- which makes silently composing them the common failure.
+  # Same rule CTX-A01i applies to a citation pack.
+  - pkg/shard:TestSecurityACompositionCannotMixRevisions
