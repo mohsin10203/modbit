@@ -1330,6 +1330,8 @@ Capability registry entry: `contracts/capabilities/model.canonical-ir.yaml`.
 | MOD-A01i | Gateway streaming pipeline: S1–S10 protocol, cancellation, backpressure, stall abandonment | SDD §10 | ✅ Qualified | `pkg/gateway/streaming.go`, 16 protocol tests + `stream_terminal_contract` conformance case |
 | MOD-A01j | Canonical event emission, written atomically with the metadata | INV-5, R-EVT-04, OEV-1 | ✅ Qualified | `pkg/gateway/events.go`, 9 assertions |
 | MOD-A01k | Provider egress allowlist enforced in-process; no-filesystem-mounts remains deployment-level | SDD §10 | ✅ Qualified | `pkg/gateway/egress.go`, 22 assertions incl. metadata-endpoint and DNS-rebind suites |
+| MOD-A01l | `services/modbit-model-gateway` — the deployable (SDD §4.4) | INV-1, INV-2 | 🚧 In Progress | **First deployable in the repository.** Credential boundary and HTTP surface Qualified: `services/modbit-model-gateway`, 12 tests, M1–M5 mutation-verified. Credentials are read once, scrubbed from the environment, leased for 5 min, and unreachable through formatting, JSON, errors or discovery. Serves `/healthz` and `/v1/providers` |
+| MOD-A01l-2 | `/v1/complete` and `/v1/stream` over HTTP | INV-5, INV-6 | ⛔ Blocked | **On ADR-0103, not on effort.** `gateway.New` accepts a nil `Recorder`, so the endpoint is constructible today — and a gateway that serves calls without persisting model-call metadata and canonical events violates INV-5 and INV-6. A durable store is the missing piece, which is the same decision blocking `CTX-A01d2`, `CTX-A01f2` and `QA-A01b`'s R-EVT-04/05/06/08. Four items now wait on one ADR |
 
 **MOD-A01g provider adapter (O1–O10)**
 
