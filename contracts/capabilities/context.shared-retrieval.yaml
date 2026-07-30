@@ -1,0 +1,72 @@
+# Capability: shared-index retrieval.
+#
+# LCX-8 is written the way requirements are written when they know what argument they will hear.
+# The PRD lists "encrypted embeddings alone are not described as searchable shared context" among
+# the proposal elements it rejected outright, which is unusual enough to be the point: the claim is
+# that encrypted vectors make an index safe to share, and it is false because the index is queried
+# on somebody's behalf and returns something. Whatever comes back either resolves to a source the
+# requester may read or it does not, and encryption at rest changes neither. So Index.Encrypted is
+# recorded and consulted nowhere, and the tests assert the encrypted and plain paths agree in both
+# directions rather than only on the refusal.
+#
+# Three drops that must leave no trace, for one reason: a filtered result that is visible as having
+# been filtered is an existence oracle. A "restricted result" placeholder, a pre-filter total, and a
+# refusal that names the source all tell an attacker who can phrase queries which ones hit
+# something. So an unresolvable match, a cross-Space match and a denied match are each dropped
+# silently, and the reported total counts what was returned.
+#
+# Resolution happens at query time, not index time. An index-time filter answers the permission
+# question as it stood whenever the crawler last ran, and permissions change after indexing.
+#
+# LCX-5's partial availability is declared rather than absorbed. A retrieval over a partly available
+# index that presents itself as whole is worse than one that admits the gap: the caller's next move
+# -- concluding the codebase does not contain the thing -- is wrong in a way nothing corrects.
+#
+# Boundary: it builds no index, computes no embedding and ranks nothing. A caller supplies matches
+# and the means to resolve and authorize them.
+
+id: context.shared-retrieval
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§8A.3-LCX-5
+  - PRD-v5.1-§8A.3-LCX-8
+  - PRD-v5.1-§8A.3-LCX-9
+  - PRD-v5.1-§17-IAM-5
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # LCX-8. A source we cannot resolve is one we cannot say anything about, including whether the
+  # requester may know it exists.
+  - pkg/sharedcontext:TestSecurityAnUnresolvableMatchIsDroppedNotPlaceheld
+  # Query-time authorization across all ten dimensions, each omitted in turn: a dimension nobody
+  # evaluated must not read as permission.
+  - pkg/sharedcontext:TestSecurityAnIncompleteAuthorizationIsNotAnAllow
+  # The rejected argument, asserted in both directions so the flag changes nothing either way.
+  - pkg/sharedcontext:TestSecurityAnEncryptedIndexGetsNoRelaxation
+  # IAM-5 and INV-10. Checked before authorization, because an evaluation built for one Space asks
+  # the wrong question about another Space's source.
+  - pkg/sharedcontext:TestSecurityACrossSpaceMatchNeverReachesTheAuthorizer
+  # The count is post-filter, and a wholly-denied retrieval is indistinguishable from an empty one.
+  - pkg/sharedcontext:TestSecurityTheTotalIsPostFilter
+  # LCX-9. A remote agent carries the delegating user's authority and no more, and an empty
+  # delegation conveys nothing rather than everything.
+  - pkg/sharedcontext:TestSecurityADelegatedRetrievalCannotExceedItsDelegation
+  # LCX-5. Declared, with the missing partitions named, and the zero Retrieval claims nothing.
+  - pkg/sharedcontext:TestSecurityPartialAvailabilityIsDeclared
+  # A nil authorizer is the shortest path to returning everything unfiltered.
+  - pkg/sharedcontext:TestSecurityAMissingResolverOrAuthorizerFailsClosed
+  - pkg/sharedcontext:TestResultsAreOrderedByScore
