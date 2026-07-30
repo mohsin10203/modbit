@@ -1,0 +1,64 @@
+# Capability: session insight admission.
+#
+# §23.22 requires insights to be visibly labelled as generated analysis, and the reason is WIKI-3's
+# with more force. A CodeWiki page says what the code does and a reader can check it. An insight
+# says "your team keeps correcting the agent about error handling; consider adding a Rule" -- a
+# claim about people, derived from a sample, phrased as advice. It is acted on rather than verified.
+# So the label is not a rendering concern: an insight cannot be constructed without it, the same way
+# LCD-3's degradation cannot be constructed without a reason. There is deliberately no "verified"
+# label, because nothing here verifies anything and offering the value would invite it.
+#
+# "Repeated user corrections" carries a floor, for the reason MEM-2 refuses to promote on a single
+# trajectory: a correction seen twice is a coincidence with a sample size. The floor is on the runs
+# that *showed* it rather than on the runs observed -- two corrections across fifty runs is a rarer
+# coincidence, not a stronger one.
+#
+# "Not checked" is kept distinct from "absent". Recommending that a team add a Rule when nobody
+# looked at whether one exists is the failure that destroys trust in the feature the first time it
+# happens, and the two collapse into the same "there is no Rule here" if the zero value is absent.
+#
+# Aggregation takes the organization as a parameter rather than reading it from the first record,
+# because deriving the scope from the data means one mis-scoped record silently widens it (INV-10).
+# A stray record is an error rather than a silent filter: it means something upstream is mis-scoped,
+# and dropping it quietly leaves that in place.
+#
+# Boundary: it analyses no run, computes no metric and calls no model.
+
+id: insights.session-analysis
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§23.22-session-insights
+
+surfaces:
+  desktop: required
+  cli: equivalent
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: required
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # The label, asserted on the type, on validation, and on everything the constructor produces.
+  - pkg/insights:TestSecurityAnInsightCannotBeConstructedWithoutItsLabel
+  # A recommendation from no evidence is an opinion in the shape of a finding. The citation is a
+  # copy, so mutating the observation afterwards cannot rewrite what the insight claims to rest on.
+  - pkg/insights:TestSecurityAnInsightCitesTheRunsItCameFrom
+  # The population floor, including the fifty-runs-two-corrections case that a floor on the observed
+  # count alone would pass.
+  - pkg/insights:TestSecurityACorrectionNeedsMoreThanACoincidenceToBecomeAdvice
+  # An observation that checked nothing reports nothing absent -- not everything absent.
+  - pkg/insights:TestSecurityAnUncheckedConfigurationAreaIsNotReportedMissing
+  # Retention, with an unset window keeping rather than deleting: an unconfigured deployment that
+  # keeps insights is recoverable, one that discards them is not.
+  - pkg/insights:TestSecurityRetentionExpiresInsightsAndAnUnsetWindowKeepsThem
+  # INV-10, including the empty-scope-and-empty-list case where the per-insight check has nothing
+  # to catch and a caller would otherwise be told the organization has no insights.
+  - pkg/insights:TestSecurityAggregationNeverCrossesAnOrganization
+  - pkg/insights:TestSecurityAnInsightMustRecommendSomething
