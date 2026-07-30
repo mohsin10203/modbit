@@ -1,0 +1,76 @@
+# Capability: integration and inbound-event admission.
+#
+# INT-8 is the unusual one: it forbids a *claim* rather than a behaviour. It needs enforcing in code
+# because the claim and the evidence live in different places -- a tier is a line in a config file,
+# the qualification is a test run -- and nothing stops the line being written first. So a Native
+# claim is validated against INT-9's seven areas and refused when any is missing, rather than
+# quietly downgraded. A downgrade renders correctly in the UI and leaves the false claim in the
+# config for the next reader.
+#
+# INT-4's idempotency cannot be manufactured. For a provider that sends no delivery identifier the
+# tempting substitute is to hash the payload, and that is worse than having nothing: two genuinely
+# distinct events with identical payloads -- the same comment posted twice, a label applied and
+# removed and applied -- collapse into one and the second is dropped silently. Dropping a real event
+# is a worse failure than processing a duplicate and it is invisible. So the gap is declared: a
+# provider with no delivery identifier cannot claim idempotency, and therefore cannot be Native.
+#
+# Signatures are checked before the ledger records anything. Recording first would let anyone who
+# can reach the endpoint send a forgery carrying the delivery identifier the provider is about to
+# use, so the real event arrives afterwards and is dropped as a duplicate. The forgery never has to
+# be processed to do that -- it only has to be remembered.
+#
+# Boundary: it verifies no signature, holds no credential, and calls no external API. A caller
+# supplies a verification result and this decides what it means.
+
+id: integration.admission
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§12.5-INT-1
+  - PRD-v5.1-§12.5-INT-3
+  - PRD-v5.1-§12.5-INT-4
+  - PRD-v5.1-§12.5-INT-6
+  - PRD-v5.1-§12.5-INT-7
+  - PRD-v5.1-§12.5-INT-8
+  - PRD-v5.1-§12.5-INT-9
+
+surfaces:
+  desktop: equivalent
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: admin_only
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # INT-7. The tier set is closed and the zero value is not in it: an unclassified integration is
+  # presented at whatever the surface defaults to, and every UI that lists integrations lists them
+  # best-first.
+  - pkg/integration:TestSecurityAnUnclassifiedIntegrationIsRefused
+  # INT-8 and INT-9. Each of the seven areas is dropped in turn, because an implementation checking
+  # only that the list is non-empty passes a single witness.
+  - pkg/integration:TestSecurityANativeClaimRequiresEveryQualificationArea
+  # INT-4's precondition. The unsupported case is permitted and must be declared.
+  - pkg/integration:TestSecurityIdempotencyCannotBeClaimedWithoutADeliveryIdentifier
+  # INT-4. Processed once, bounded window, oldest-first eviction, and the eviction count exposed --
+  # a redelivery of a forgotten event will be processed again, which is a fact an operator needs.
+  - pkg/integration:TestSecurityARedeliveryIsProcessedOnce
+  # Signature before ledger, so a forgery cannot burn the identifier the real event will use.
+  - pkg/integration:TestSecurityAForgedDeliveryCannotBurnTheIdentifierTheRealEventWillUse
+  # INT-6. A payload that could describe its own trust level would be asked to, and then whoever can
+  # post a comment decides how their comment is treated.
+  - pkg/integration:TestSecurityAnInboundEventIsUntrustedWhateverItsPayloadSays
+  # INT-1. Service identity and no unbounded scope. The wildcard check catches the case that recurs;
+  # it does not prove minimality, and the code says so.
+  - pkg/integration:TestSecurityAUserIdentityOrUnboundedScopeIsRefused
+  # INT-3. The service identity says which integration acted; only the actor says on whose behalf.
+  - pkg/integration:TestSecurityAnExternalMutationMustBeAttributable
+  # Delivery identifiers scoped per integration: two providers will both eventually emit "1", and a
+  # bare-keyed ledger presents the collision as an event that simply never arrived.
+  - pkg/integration:TestSecurityOneIntegrationsDeliveryIdCannotSuppressAnothers
