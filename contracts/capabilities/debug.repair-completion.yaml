@@ -1,0 +1,72 @@
+# Capability: debug run admission and repair completion.
+#
+# DBG-5 says a repair is incomplete until the *original* reproduction no longer fails, and the word
+# "original" is the requirement. The natural end of a debugging session is a narrowed-down case: the
+# agent finds a small command that demonstrates the bug and fixes it until that command passes. That
+# is a different claim from the one the user made, and the gap between the two is exactly where a
+# fix that addresses the symptom lives. So completion compares the reproduction by value against the
+# one recorded at the start, and a run that verified something else is incomplete no matter how
+# green it is.
+#
+# DBG-6 is checked as a flag separate from its result, because "we looked and found nothing" and "we
+# did not look" produce the same empty list of new failures.
+#
+# DBG-3 permits instrumentation to be *identified* rather than removed, which is the right
+# allowance -- a log line that turned out to be worth keeping should be kept. What it does not
+# permit is instrumentation nobody decided about, which is what a run leaves behind when it ends by
+# getting the tests to pass.
+#
+# DBG-2's ranks are explicit integers rather than list position, because list order is invisible in
+# a report and gets shuffled by anything that re-serialises it -- and two hypotheses at the same
+# rank are not ranked at all, since which one a reader takes as more likely would then be decided by
+# serialisation order.
+#
+# Boundary: it runs no reproduction, executes no command and edits no code.
+
+id: debug.repair-completion
+version: 1
+owner: platform
+security_class: medium
+
+requirements:
+  - PRD-v5.1-§8.4-DBG-1
+  - PRD-v5.1-§8.4-DBG-2
+  - PRD-v5.1-§8.4-DBG-3
+  - PRD-v5.1-§8.4-DBG-4
+  - PRD-v5.1-§8.4-DBG-5
+  - PRD-v5.1-§8.4-DBG-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: equivalent
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # DBG-1. Either a command or an environment, and a statement of what going wrong looks like -- so
+  # "it passed" is a claim about something rather than an absence of output.
+  - pkg/debug:TestSecurityADebugRunMustRecordItsReproduction
+  # DBG-2. Explicit ranks, distinct ranks, and an ordering that survives a shuffled slice.
+  - pkg/debug:TestSecurityHypothesesAreExplicitlyRankedAndTheRanksAreDistinct
+  # "Ruled it out" and "never got to it" are different things to whoever reads the diagnosis, and
+  # the second is where the real cause hides.
+  - pkg/debug:TestSecurityAnUntestedHypothesisIsNotARefutedOne
+  # DBG-4. A diagnosis without runtime evidence is a hypothesis wearing a hat, and it reads
+  # identically in a report.
+  - pkg/debug:TestSecurityADiagnosisWithoutRuntimeEvidenceIsRefused
+  # DBG-5's "original", including the different-environment case: same command, different place.
+  - pkg/debug:TestSecurityVerifyingANarrowedReproductionDoesNotCompleteTheRepair
+  # DBG-6, with the unchecked pass distinguished from a clean one.
+  - pkg/debug:TestSecurityAnUncheckedRegressionPassBlocksCompletion
+  # DBG-3. Removed or identified; forgotten is neither, and whitespace is not a decision.
+  - pkg/debug:TestSecurityInstrumentationMustBeRemovedOrIdentified
+  # Every blocker at once, because a session reporting one at a time takes as many rounds as it has
+  # problems -- and "still fails" is deliberately not reported alongside "ran the wrong thing",
+  # which would be a claim about a run that did not happen.
+  - pkg/debug:TestSecurityTheZeroCompletionClosesNothingAndBlockersComeTogether
