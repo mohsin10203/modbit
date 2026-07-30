@@ -1,0 +1,76 @@
+# Capability: the Instruction Manifest.
+#
+# INS-2 and INS-3 are the same requirement approached twice, and they exist because of how
+# compaction actually fails. A long conversation gets summarised, the summary says "the user asked
+# for tests to be written first", and that sentence is now the only trace of a Rule that said
+# something more specific. The next turn reads the transcript, finds the sentence, and follows the
+# paraphrase. Nothing about that looks like a failure: the agent is following instructions, they are
+# just slightly different instructions, and the original is gone.
+#
+# So a Turn carries its compaction summary as a field this package can see and never reads for
+# instructions -- the same shape as REV-1's implementer rationale and Index.Encrypted, and for the
+# same reason: a check has to be able to see what it is refusing.
+#
+# INS-6 blocks mutating work, and only mutating work. Reading the codebase with an incomplete
+# instruction set is how a user finds out something is wrong, and refusing that too leaves them with
+# an agent that will not explain why it will not work.
+#
+# INS-5's carriage reports *changed* instructions alongside added and removed. Same id, same name,
+# different content is what a mid-run Rule edit produces, and an id-only comparison calls it
+# preserved.
+#
+# "Mandatory" is a parameter to Build rather than a field on a Rule, because it is a deployment's
+# policy statement about an instruction and not a property the instruction's author gets to assert
+# -- the same separation as a worker's advertised capabilities and its assigned policy labels.
+#
+# On the hash: rules.Rule.Hash already contains the rule's id, so for *resolved* instructions
+# hashing the content alone is equivalent. It stops being equivalent for an unresolved mandatory
+# instruction, which has no content hash -- two deployments missing different mandatory rules would
+# then report the same manifest and a comparison would say they run the same instructions. The test
+# narrows to exactly that case, with both unresolved ids sorting to the same position so the
+# differing positions cannot distinguish them incidentally.
+
+id: instruction.manifest
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§14-INS-1
+  - PRD-v5.1-§14-INS-2
+  - PRD-v5.1-§14-INS-3
+  - PRD-v5.1-§14-INS-4
+  - PRD-v5.1-§14-INS-5
+  - PRD-v5.1-§14-INS-6
+  - PRD-v5.1-§14-INS-7
+  - PRD-v5.1-§14-INS-8
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # INS-1, including the id-in-hash case isolated to where it is not already covered by Rule.Hash.
+  - pkg/manifest:TestSecurityTheManifestHashCoversContentNotJustIdentity
+  # INS-2 and INS-3, against a paraphrasing summary, a contradicting one and an injecting one.
+  - pkg/manifest:TestSecurityACompactionSummaryNeverReplacesTheManifest
+  # INS-4. Ids and hashes together, and an unresolved instruction never traced as active.
+  - pkg/manifest:TestSecurityTheTurnTraceCarriesIdentifiersAndHashesTogether
+  # INS-6. Mutating work stops; reading does not, because that is how a user finds out.
+  - pkg/manifest:TestSecurityAnUnresolvedMandatoryInstructionBlocksOnlyMutatingWork
+  - pkg/manifest:TestSecurityMandatoryIsADeploymentStatementNotAnAuthorsClaim
+  # INS-5. Added, removed and changed -- the third is what a mid-run edit produces.
+  - pkg/manifest:TestSecurityCarriageReportsChangedInstructionsNotJustAddedAndRemoved
+  # INS-7. Precedence decides what applies; it does not make the disagreement stop having happened.
+  - pkg/manifest:TestSecurityConflictsSurviveIntoTheManifest
+  # INS-8. Reports what would *not* apply as well as what would: a user checking why a Rule is not
+  # firing needs to see it considered and rejected, not simply absent.
+  - pkg/manifest:TestActivationCanBeTestedWithoutApplyingIt
