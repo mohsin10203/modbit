@@ -1,0 +1,53 @@
+# Capability: plugin package admission.
+#
+# PLG-4 lets administrators define allowlists, and the trap is that "defined and empty" and "not
+# defined" are the same value in most representations while meaning opposite things. An
+# administrator who saved an empty allowlist has said nothing is permitted; reading that as "no
+# restriction" installs everything at precisely the moment somebody was trying to stop it. So the
+# type distinguishes nil from empty and says which is which.
+#
+# PLG-3 lists pinning, compatibility, revocation and rollback together, but they are not peers. A
+# pin says what an operator wants; a revocation says a version is unsafe. Revocation is therefore
+# checked first -- a revoked-but-pinned version is exactly the situation after an advisory, because
+# the pin was set before anybody knew.
+
+id: plugin.admission
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§9D-PLG-1
+  - PRD-v5.1-§9D-PLG-2
+  - PRD-v5.1-§9D-PLG-3
+  - PRD-v5.1-§9D-PLG-4
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: admin_only
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # PLG-1. A plugin declaring nothing is not harmless -- it is one whose capability nobody stated,
+  # and the requirement exists so a reviewer can see what they are granting.
+  - pkg/plugin:TestPLG1RequiresDeclaredPermissions
+  # PLG-4's nil-versus-empty distinction, on both the publisher and package axes.
+  - pkg/plugin:TestSecurityAnEmptyAllowlistPermitsNothing
+  # PLG-2, including the distinction that matters: a present-but-unverified signature is refused
+  # with its own reason, because it looks like assurance to anyone reading a package listing and is
+  # therefore worse than none.
+  - pkg/plugin:TestSecurityAManagedDeploymentRequiresAVerifiedSignature
+  - pkg/plugin:TestAnUnmanagedDeploymentDoesNotRequireASignature
+  # PLG-3. Revocation outranks a pin, and rollback never offers a revoked version -- the most likely
+  # way to reintroduce the vulnerability the revocation was issued for, at the moment somebody most
+  # wants "the last one that worked".
+  - pkg/plugin:TestSecurityARevokedVersionNeverInstallsEvenWhenPinned
+  - pkg/plugin:TestSecurityRollbackNeverOffersARevokedVersion
+  - pkg/plugin:TestPinningAndPlatformFloorAreHonoured
