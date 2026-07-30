@@ -249,27 +249,18 @@ func (g *Gateway) pump(ctx context.Context, c Call, p prepared, candidate infere
 		case <-ctx.Done():
 			// S7: abandon the upstream rather than draining it. The provider observes the same
 			// cancelled context and stops on its own.
-			terminate(nil, modberr.Wrap(ctx.Err(), modberr.CodeCancelled, "stream cancelled"))
+			terminate(nil, cancellationCause(ctx))
 			return
 
 		case ev, open := <-upstream:
 			if !open {
-				// A provider stream that closed without a terminal event produced an incomplete
-				// response. Reporting success here would let a truncated answer pass as a whole one.
-				terminate(nil, modberr.New(modberr.CodeProviderUnavailable,
-					"provider stream ended without a completion").
-					WithDetail("provider_id", candidate.Model.ProviderID).
-					WithDetail("upstream_class", "truncated_stream"))
+				terminate(nil, closedStreamCause(ctx, candidate.Model.ProviderID))
 				return
 			}
 
 			switch ev.Kind {
 			case inference.StreamError:
-				cause := ev.Err
-				if cause == nil {
-					cause = modberr.New(modberr.CodeProviderUnavailable, "provider reported a stream error")
-				}
-				terminate(nil, cause)
+				terminate(nil, streamErrorCause(ctx, ev.Err))
 				return
 
 			case inference.StreamMessageStop:
@@ -299,6 +290,57 @@ func (g *Gateway) pump(ctx context.Context, c Call, p prepared, candidate infere
 			}
 		}
 	}
+}
+
+// The termination cause of an interrupted stream, decided in one place.
+//
+// # Why these are functions and not three inline branches
+//
+// The pump selects on the caller's context and on the upstream channel. When the caller cancels,
+// the adapter observes the same context, stops, and closes upstream on its way out — so both cases
+// become ready and Go picks between them pseudorandomly. Whichever it picked used to decide what
+// the run was recorded as. On a macOS developer machine ctx.Done() won every time; on a Linux CI
+// runner the closed channel won once, and a cancelled run was recorded as a provider that
+// truncated its stream.
+//
+// Making cancellation win explicitly in every branch is what removes the coin flip, and having the
+// branches share these functions is what keeps the next one from being written without the check.
+
+// cancellationCause is the error for a stream the caller ended.
+func cancellationCause(ctx context.Context) error {
+	return modberr.Wrap(ctx.Err(), modberr.CodeCancelled, "stream cancelled")
+}
+
+// closedStreamCause explains an upstream that closed without a terminal event.
+//
+// A closed stream is only evidence about the provider if the provider was still meant to be
+// streaming. Under cancellation the adapter closed the channel because it was told to stop, and
+// filing that as a truncated stream writes a provider fault into the record for something the user
+// did on purpose.
+func closedStreamCause(ctx context.Context, providerID string) error {
+	if ctx.Err() != nil {
+		return cancellationCause(ctx)
+	}
+	// Reporting success here would let a truncated answer pass as a whole one.
+	return modberr.New(modberr.CodeProviderUnavailable,
+		"provider stream ended without a completion").
+		WithDetail("provider_id", providerID).
+		WithDetail("upstream_class", "truncated_stream")
+}
+
+// streamErrorCause explains an upstream that reported an error.
+//
+// Cancellation is checked first for the same reason: an adapter that surfaces its cancelled context
+// as a stream error is reporting our own cancellation back to us, and taking it at face value
+// blames the provider for it.
+func streamErrorCause(ctx context.Context, upstreamErr error) error {
+	if ctx.Err() != nil {
+		return cancellationCause(ctx)
+	}
+	if upstreamErr != nil {
+		return upstreamErr
+	}
+	return modberr.New(modberr.CodeProviderUnavailable, "provider reported a stream error")
 }
 
 func observedRevision(resp *inference.Response) string {

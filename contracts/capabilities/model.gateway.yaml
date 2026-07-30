@@ -93,6 +93,13 @@ tests:
   - pkg/gateway:TestStreamPreparationRefusalsAreSynchronous
   - pkg/gateway:TestStreamPerformsNoEgressBeforeDLP
   - pkg/gateway:TestStreamRecordsMetadataOnEveryTermination
+  # S11. The pump selects on the caller's context and on the upstream channel, and under
+  # cancellation both are ready -- the adapter observes the same context and closes the channel on
+  # its way out. Go picks between ready cases pseudorandomly, so which one won decided whether the
+  # run was recorded as cancelled or as a provider that truncated its stream. It won correctly on
+  # macOS every time and lost once on a Linux CI runner. The attribution is now a pure function
+  # asserted directly, because a coin flip cannot be pinned by repeating the integration test.
+  - pkg/gateway:TestSecurityAnInterruptedStreamIsAttributedToWhoeverInterruptedIt
   - pkg/gateway:TestStreamCancellationIsPrompt
   - pkg/gateway:TestStreamAppliesBackpressureToTheProvider
   - pkg/gateway:TestStreamAbandonsAStalledConsumer
