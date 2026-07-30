@@ -52,6 +52,16 @@ tests:
   - services/modbit-model-gateway:TestSecurityAFailedScrubRefusesToStart
   - services/modbit-model-gateway:TestNoCredentialsFailsClosedAtStartup
   - services/modbit-model-gateway:TestALeaseExpires
+  # The HTTP surface. Health and capability discovery only -- /v1/complete needs an inference
+  # Registry, which needs a model catalog no contract defines yet, and inventing that shape would be
+  # introducing product scope. The credential sweep runs over every route including the absent one.
+  - services/modbit-model-gateway:TestSecurityNoResponseCarriesCredentialMaterial
+  - services/modbit-model-gateway:TestSecurityHealthDoesNotDescribeConfiguration
+  - services/modbit-model-gateway:TestProviderDiscoveryListsIdsOnly
+  - services/modbit-model-gateway:TestUnknownRoutesAreRefused
+  - services/modbit-model-gateway:TestErrorEnvelopeCarriesTheCodeAndNotTheCause
+  - services/modbit-model-gateway:TestTheProcessServesAndShutsDownCleanly
+  - services/modbit-model-gateway:TestTheProcessRefusesToStartWithoutCredentials
   - pkg/inference/openai:TestSecurityAdapterRefusesToBuildItsOwnHTTPClient
   - pkg/inference/openai:TestSecurityEgressRefusalIsNotReportedAsAnOutage
   - pkg/inference/openai:TestSecurityCredentialTravelsOnlyInTheAuthorizationHeader
