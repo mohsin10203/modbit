@@ -1,0 +1,80 @@
+# Capability: remote worker registration and scheduler eligibility.
+#
+# WRK-2 says workers advertise capabilities and labels, and the natural implementation puts both in
+# one bag the worker sends at registration. That is the bug this package exists to prevent. A
+# *capability* is a claim about what the machine can do -- it has a GPU, it has Docker -- and the
+# worker is the only thing that knows. A *policy label* is a claim about what the machine may be
+# trusted with -- it is in the PCI enclave, it may hold production credentials -- and the worker is
+# the last thing that should be asked. In one bag, a compromised worker advertises the label that
+# gates the work it wants. So Registration has no label field at all, and Register never populates
+# one.
+#
+# WRK-3 is the same shape a level up: the organization is a parameter supplied by the *server*, not
+# a field on the registration, because asking a worker which organization it belongs to and
+# believing the answer is how a worker runs someone else's jobs (INV-10). The mismatch check cannot
+# catch every case on its own -- an empty claim and an empty record compare equal -- so an absent
+# ownership record is refused separately.
+#
+# WRK-5's drain is deliberately not folded into health. "We are upgrading this" and "this has
+# stopped answering" are the same to a scheduler and completely different to an operator at 3am, and
+# the refusal reasons stay distinguishable so a log says which happened.
+#
+# Three of four surviving mutants were real gaps that only appear under a different policy: an
+# org-less worker where both claim and record are empty, a never-heartbeated worker measured against
+# a zero clock, and a version-0 worker in a deployment that sets no floor. Each is now covered. The
+# fourth -- assigning the registration's claim rather than the server's record -- is provably
+# equivalent, because the mismatch check guarantees the two strings are equal at that point, and the
+# test says so rather than leaving it looking like an untested line.
+#
+# Boundary: it authenticates nothing itself and schedules nothing.
+
+id: worker.registration
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§16.3-WRK-1
+  - PRD-v5.1-§16.3-WRK-2
+  - PRD-v5.1-§16.3-WRK-3
+  - PRD-v5.1-§16.3-WRK-4
+  - PRD-v5.1-§16.3-WRK-5
+  - PRD-v5.1-§16.3-WRK-6
+  - PRD-v5.1-§16.3-WRK-7
+  - PRD-v5.1-§16.3-WRK-8
+
+surfaces:
+  desktop: not_applicable
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: admin_only
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # WRK-1. Both directions, refused distinctly -- a worker that did not authenticate the server may
+  # be talking to something else entirely, and registering it means that something else has a worker.
+  - pkg/worker:TestSecurityBothDirectionsOfTheHandshakeAreRequired
+  # WRK-3 and INV-10, including the empty-claim-and-empty-record case the mismatch check cannot see.
+  - pkg/worker:TestSecurityTheServersOwnershipRecordBeatsTheWorkersClaim
+  # WRK-2's separation of advertised capability from assigned label, asserted in both directions:
+  # the worker cannot advertise its way past the gate, and a server-assigned label does satisfy it.
+  - pkg/worker:TestSecurityAWorkerCannotLabelItselfIntoEligibility
+  # WRK-4, including the zero heartbeat against a zero clock -- the one point where the arithmetic
+  # would otherwise read "nobody reported and nobody looked at the time" as a live worker.
+  - pkg/worker:TestSecurityAStaleWorkerIsIneligibleAndTheZeroHeartbeatIsStale
+  # WRK-5. A planned upgrade and an outage refuse for different, distinguishable reasons.
+  - pkg/worker:TestSecurityDrainingIsDistinctFromUnhealthy
+  # WRK-6, each condition broken alone so no check stands in for another.
+  - pkg/worker:TestSecurityEveryEligibilityConditionMustHold
+  # WRK-7, at registration and at scheduling, including a deployment that sets no floor.
+  - pkg/worker:TestSecurityTheVersionFloorIsEnforcedAtRegistrationAndScheduling
+  # WRK-8. Declared rather than inferred, and enforced when a relaxed policy later tightens.
+  - pkg/worker:TestSecurityAttestationIsRequiredOnlyWhenDeclaredAndThenAbsolutely
+  # An unrecognised health state compares unequal to healthy and would take a worker out of service
+  # silently -- presenting as one that stopped receiving work for no reason anybody can find.
+  - pkg/worker:TestSecurityAnUnrecognisedHealthReportIsRefused
