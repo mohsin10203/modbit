@@ -1460,7 +1460,7 @@ PRD §6.3. Docket §5. Includes v5.1 families **LRN** and **CRC**.
 | SEC-C01 | SSO/SCIM/service identities | ⬜ Proposed |
 | AUT-C01 | GitHub/GitLab events | ⬜ Proposed |
 | AUT-C02 | Automation engine | ⬜ Proposed |
-| SEC-C02 | Task Secret broker | ⬜ Proposed |
+| SEC-C02 | Task Secret broker | 🚧 In Progress — **SEC-10..SEC-17 lease contract Qualified**: `pkg/secret`, 9 tests, T1–T9 invariants, seven mutants caught. A lease is a six-coordinate tuple compared whole, with use count and expiry enforced, child inheritance denied by default, revocation idempotent, and the value unreachable through formatting, JSON or audit rendering. The vault/keychain backing store and SEC-5's five-second revocation propagation need a durable store and a worker fleet | ⬜ Proposed |
 | REV-C01 | Full code-review product | ⬜ Proposed |
 | CTX-C01 | Remote/shared indexing | ⬜ Proposed |
 | WIKI-C01 | Shared CodeWiki and annotations | ⬜ Proposed |
