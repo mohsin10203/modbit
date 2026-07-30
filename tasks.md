@@ -1469,7 +1469,7 @@ PRD §6.3. Docket §5. Includes v5.1 families **LRN** and **CRC**.
 | DEP-C01 | Team server Helm/Terraform | ⬜ Proposed |
 | QA-C01 | Multi-tenant qualification | ⬜ Proposed |
 | LRN-01..08 | Tiered memory and learning | ⬜ Proposed |
-| CRC-01..05 | Concurrent-run coordination | ⬜ Proposed |
+| CRC-01..06 | Concurrent-run coordination | 🚧 In Progress — **CRC-1, CRC-2, CRC-5, CRC-6 Qualified**: `pkg/coordination`, 10 tests, K1–K8 invariants, six mutants caught (one survivor exposed a real gap). Symbol and dependency-closure overlap, advisory locks that never block and always expire, and a tenant boundary that refuses a cross-tenant comparison rather than answering it empty. CRC-3 (speculative rebase) needs git; CRC-4 (merge-queue state) needs a source-control provider. **First Phase C item.** | ⬜ Proposed |
 
 ---
 

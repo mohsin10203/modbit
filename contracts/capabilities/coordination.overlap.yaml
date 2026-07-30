@@ -1,0 +1,51 @@
+# Capability: concurrent-run overlap detection and advisory locks.
+#
+# An overlap detector wants to compare everything. That is what makes it useful and what makes it a
+# disclosure risk: CRC-6 scopes coordination metadata per tenant and INV-10 makes cross-Space or
+# cross-organization leakage a release blocker. Reporting "another run is editing this symbol"
+# across a tenant boundary leaks that a different organization has a run, on which repository,
+# touching which symbol -- three facts, none of them the caller's.
+#
+# So tenancy is not a filter on results. A cross-tenant comparison is refused, because "no overlap"
+# and "not permitted to know" must not be the same reply.
+
+id: coordination.overlap
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§11C-CRC-1
+  - PRD-v5.1-§11C-CRC-2
+  - PRD-v5.1-§11C-CRC-5
+  - PRD-v5.1-§11C-CRC-6
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # CRC-1. Both halves: a claim both runs made, and a shared dependency-closure file neither run
+  # claimed -- the second is the interesting one, because it is the conflict no author wrote down.
+  - pkg/coordination:TestADirectlySharedClaimIsAConflict
+  - pkg/coordination:TestADependencyClosureOverlapIsAConflictNeitherRunClaimed
+  - pkg/coordination:TestDifferentRepositoriesDoNotOverlap
+  # CRC-6 and INV-10. The refusal, and the silence of the refusal: an error naming the colliding run
+  # and symbol would disclose exactly what the tenant boundary withholds.
+  - pkg/coordination:TestSecurityACrossTenantComparisonIsRefused
+  - pkg/coordination:TestSecurityTheCrossTenantRefusalDisclosesNothing
+  - pkg/coordination:TestSecurityAScopeWithoutTenancyIsRefused
+  - pkg/coordination:TestSecurityAnUninterpretableClaimIsRefused
+  # CRC-2. Advisory means visible and never silently blocking, so a contended Take succeeds and Held
+  # reports. A lock with no expiry is treated as already expired rather than eternal -- an unbounded
+  # lock left by a crashed run would shadow a symbol forever, invisibly, because nothing blocks.
+  - pkg/coordination:TestSecurityAnAdvisoryLockNeverBlocks
+  - pkg/coordination:TestSecurityALockWithNoExpiryIsAlreadyExpired
