@@ -1455,7 +1455,7 @@ PRD §6.3. Docket §5. Includes v5.1 families **LRN** and **CRC**.
 
 | ID | Task | Status |
 |---|---|---|
-| SRV-C01 | Organization/Team/Space/RBAC | ⬜ Proposed |
+| SRV-C01 | Organization/Team/Space/RBAC | 🚧 In Progress — **R-TEN-05 dimension combination Qualified**: `pkg/authz`, 7 tests, Z1–Z7 invariants, five mutants caught. Ten dimensions, three-valued verdicts where the zero denies, gaps distinguished from denials, and a refusal that names one dimension rather than mapping the remaining boundary. The directory, role store and Space membership need a server | ⬜ Proposed |
 | SET-C01 | Settings sync and managed policy | 🚧 In Progress — **SYNC-1..SYNC-3 eligibility Qualified**: `pkg/sync`, 7 tests, Y1–Y7 invariants, six mutants caught (one survivor exposed a weak assertion). Eligibility decided from the definition's scope and security class rather than a denylist of keys, unregistered keys withheld because their class is unknown, and conflicts reported as field-level diffs carrying both values with nothing resolved. Transport encryption (SYNC-1) and managed policy distribution need a server | ⬜ Proposed |
 | SEC-C01 | SSO/SCIM/service identities | ⬜ Proposed |
 | AUT-C01 | GitHub/GitLab events | ⬜ Proposed |

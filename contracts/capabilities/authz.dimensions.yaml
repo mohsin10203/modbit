@@ -1,0 +1,49 @@
+# Capability: authorization dimension combination.
+#
+# R-TEN-05 lists ten dimensions authorization evaluates. The obvious model is a bool per dimension
+# and an AND across them, and it has exactly one failure: a dimension nobody evaluated is
+# indistinguishable from one that allowed. With ten of them, forgetting one is a matter of time, and
+# the forgotten one reads as permission.
+#
+# So a verdict is three-valued and the zero denies. A caller that adds a dimension and forgets to
+# supply it gets a refusal naming the gap rather than an authorization that quietly stopped checking
+# something -- and the decision distinguishes a gap from a denial, because one is a permission
+# question and the other is a bug in the caller.
+
+id: authz.dimensions
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - rules-R-TEN-05
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: required
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # All ten dimensions, matching R-TEN-05's list rather than a convenient subset.
+  - pkg/authz:TestAllTenDimensionsAreRequired
+  # The three-valued core: the zero Verdict denies, an omission is reported as a gap rather than a
+  # denial, and one denial refuses whatever the other nine say.
+  - pkg/authz:TestSecurityAnUnevaluatedDimensionDenies
+  - pkg/authz:TestSecurityASingleDenialRefuses
+  # The refusal names one dimension in a fixed order. Listing every failure would tell a caller how
+  # much of the boundary they are past, which is a map of the remaining distance.
+  - pkg/authz:TestSecurityTheRefusalNamesOneDimension
+  # An unknown dimension is refused rather than ignored -- ignoring it would let a caller believe it
+  # supplied a check that nothing consumed.
+  - pkg/authz:TestSecurityAnUnknownDimensionOrVerdictIsRefused
+  # An allowed decision says only that: enumerating which dimensions permitted would put the shape
+  # of the authorization model into every log line.
+  - pkg/authz:TestSecurityAnAllowedDecisionDisclosesNothing
+  - pkg/authz:TestCompleteReportsMissingDimensionsUpFront
