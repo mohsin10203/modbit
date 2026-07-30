@@ -1445,7 +1445,7 @@ PRD §6.2. Docket §4. Includes v5.1 families **TNT** and **VAD** (docket placem
 | TNT-01..05 | Provenance taint: tagger, propagation ledger, policy dimension, UI, adversarial suite | 🚧 FND-08/09 seed |
 | VAD-01..06 | Verification adequacy: mutation adapters, scoring, property-based, differential, flaky quarantine, verifier diversity | ⬜ Proposed |
 | MRS-01..04 | Monorepo scale: sparse checkout, VFS spike, Shard Manager, 10M-file benchmark | ⬜ Proposed |
-| LCD-01..04 | Capability degradation contract: matrix, negotiation, disclosure, local contract tests | ⬜ Proposed |
+| LCD-01..05 | Capability degradation contract: matrix, negotiation, disclosure, local contract tests | ✅ Qualified — `pkg/capability`, 10 tests, C1–C8 invariants, six mutants caught. **First Phase B item complete.** LCD-1 matrix over all ten features × five modes; LCD-2 negotiation against mode *and* installed models; LCD-3 enforced structurally — an outcome short of full support cannot be constructed without a reason, so no surface can render a degradation it has no explanation for; LCD-4 tiers are data so a benchmark can assert against them; LCD-5 survives the snapshot round trip |
 
 ---
 

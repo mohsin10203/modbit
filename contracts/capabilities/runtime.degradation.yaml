@@ -1,0 +1,58 @@
+# Capability: local capability degradation contract.
+#
+# LCD-3 states that silent degradation is prohibited. That is the whole of this capability, and it
+# is enforced as a property of the record rather than a rule for the UI: an outcome short of full
+# support cannot be constructed without a reason, so no surface can render one that does not have
+# an explanation to show. The surface is not where the reason is known.
+
+id: runtime.degradation
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§8A.4-LCD-1
+  - PRD-v5.1-§8A.4-LCD-2
+  - PRD-v5.1-§8A.4-LCD-3
+  - PRD-v5.1-§8A.4-LCD-4
+  - PRD-v5.1-§8A.4-LCD-5
+  - PRD-v5.1-§8A.1-operating-modes
+  - PRD-v5.1-§8A.2-LCL-5
+  - PRD-v5.1-§8A.2-LCL-8
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # LCD-1: the published matrix covers all ten features for every mode.
+  - pkg/capability:TestPublishedMatrixCoversEveryFeatureAndMode
+  # LCD-3, and the reason this capability's security class is high: a mode whose boundary forbids
+  # hosted inference must not gain capability from a reachable hosted endpoint, or network topology
+  # would override a declared boundary and LCL-4's zero-egress qualification would be unprovable.
+  - pkg/capability:TestSecurityADeviceOnlyModeIgnoresAReachableHostedModel
+  - pkg/capability:TestSecurityDegradationCannotBeSilent
+  - pkg/capability:TestSecurityEveryNegotiatedDegradationExplainsItself
+  # The refusals. An unknown mode is not defaulted, and an incomplete set is not read as a smaller
+  # promise -- a caller cannot tell "unavailable" from "not considered" once a feature is missing.
+  - pkg/capability:TestAnUnknownModeIsRefused
+  - pkg/capability:TestAnIncompleteSetIsRefused
+  - pkg/capability:TestTheZeroSupportIsUnavailable
+  # LCD-4: the tier contract is data so a benchmark can assert against it, and placement needs every
+  # dimension -- context length is the number a model advertises, tool-call reliability is the one
+  # that decides whether the agentic loop terminates.
+  - pkg/capability:TestTierPlacementRequiresEveryDimension
+  # LCD-5: the set is frozen into a run snapshot, so it is serialized and read back. A reason lost
+  # in transit turns a disclosed degradation into a silent one.
+  - pkg/capability:TestANegotiatedSetSurvivesASnapshotRoundTrip
+  # Not a stated requirement, and the property a user assumes: installing a better model must never
+  # withdraw a feature.
+  - pkg/capability:TestABetterModelNeverWithdrawsAFeature
