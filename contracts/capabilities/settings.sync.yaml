@@ -1,0 +1,60 @@
+# Capability: settings sync eligibility and conflict reporting.
+#
+# SYNC-2 names what is not synced by default -- device settings, repository-local settings, secrets,
+# browser cookies, terminal history -- and three of those are scopes the Settings Registry already
+# has. So eligibility is decided from the definition rather than from a hand-maintained list of
+# excluded keys.
+#
+# That distinction is the deliverable. A denylist of keys is correct the day it is written and wrong
+# the first time somebody adds a device setting without reading it, and the failure is a
+# device-local value silently appearing on another machine. Deciding from the scope classifies a new
+# setting by what it is.
+#
+# SYNC-3 asks for a field-level diff and does not ask for a merge. Last-write-wins is the obvious
+# implementation and satisfies neither half: it produces no diff, and a timestamp comparison is not
+# a judgement about which value is right.
+
+id: settings.sync
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§20A.9-SYNC-1
+  - PRD-v5.1-§20A.9-SYNC-2
+  - PRD-v5.1-§20A.9-SYNC-3
+  - PRD-v5.1-§20A.4-SET-1
+  - PRD-v5.1-§20A.4-SET-7
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # SYNC-2, decided by scope. A device setting describes one machine, so carrying it makes it
+  # describe a machine the other device is not.
+  - pkg/sync:TestSecurityDeviceAndRepositoryLocalScopesNeverSync
+  - pkg/sync:TestASettingOnlyAuthorableAtNonSyncingScopesIsIneligible
+  # SET-7 and INV-11. A critical-class setting is not necessarily a secret, and this is the wrong
+  # place to be clever: withholding one costs a preference somebody re-enters, the opposite mistake
+  # puts a secret on another machine.
+  - pkg/sync:TestSecurityACriticalSettingNeverSyncs
+  # SET-1. An unregistered key is withheld *because it is unregistered* -- the test asserts the
+  # reason rather than only the withholding, after a mutation that dropped the guard still withheld
+  # the key through an unrelated path and passed a weaker assertion.
+  - pkg/sync:TestSecurityAnUnregisteredKeyIsWithheld
+  # SYNC-3. Both values are carried and nothing is resolved; a key on one side only is not a
+  # conflict, because nothing disagrees and a list full of non-decisions stops being read.
+  - pkg/sync:TestSecurityAConflictCarriesBothValuesAndIsNotResolved
+  - pkg/sync:TestAKeyOnOneSideOnlyIsNotAConflict
+  # Every withheld key explains itself, so a user asking why a preference did not follow them gets
+  # an answer rather than an absence.
+  - pkg/sync:TestSecurityEveryWithheldKeyExplainsItself

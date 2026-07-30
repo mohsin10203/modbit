@@ -1456,7 +1456,7 @@ PRD §6.3. Docket §5. Includes v5.1 families **LRN** and **CRC**.
 | ID | Task | Status |
 |---|---|---|
 | SRV-C01 | Organization/Team/Space/RBAC | ⬜ Proposed |
-| SET-C01 | Settings sync and managed policy | ⬜ Proposed |
+| SET-C01 | Settings sync and managed policy | 🚧 In Progress — **SYNC-1..SYNC-3 eligibility Qualified**: `pkg/sync`, 7 tests, Y1–Y7 invariants, six mutants caught (one survivor exposed a weak assertion). Eligibility decided from the definition's scope and security class rather than a denylist of keys, unregistered keys withheld because their class is unknown, and conflicts reported as field-level diffs carrying both values with nothing resolved. Transport encryption (SYNC-1) and managed policy distribution need a server | ⬜ Proposed |
 | SEC-C01 | SSO/SCIM/service identities | ⬜ Proposed |
 | AUT-C01 | GitHub/GitLab events | ⬜ Proposed |
 | AUT-C02 | Automation engine | 🚧 In Progress — **AUT-1..AUT-7 admission Qualified**: `pkg/automation`, 8 tests, U1–U8 invariants, seven mutants caught. Declaration completeness checked before anything runs, AUT-5 enforced as no-retry-without-an-idempotency-key for irreversible side effects (keyed off `policy.SideEffectClass`), AUT-4 external mutation gated, and exhausted attempts dead-lettered rather than dropped. The event bus, scheduler and dead-letter store need a durable store (ADR-0103) | ⬜ Proposed |
