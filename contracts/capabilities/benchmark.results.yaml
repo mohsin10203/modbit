@@ -1,0 +1,80 @@
+# Capability: benchmark result admission.
+#
+# §37.2's requirements are all ways of saying the same thing: a benchmark number is a claim, and a
+# claim nobody can reproduce or bound is decoration. Three of them carry most of the weight.
+#
+# Hidden and visible tests. An agent optimising against tests it can read is measuring its own
+# reading. A result computed without hidden tests is refused rather than reported with a caveat,
+# because the caveat is a footnote and the figure is what gets quoted.
+#
+# Confidence intervals. The interval is Wilson rather than the normal approximation, which is wrong
+# exactly where a small suite lands: at 0 and 1 the normal interval has zero width and reports
+# perfect certainty from three trials. The test asserts non-zero *width*, not a bound below 1 -- a
+# mutation substituting the normal approximation produced a zero-width interval centred at 0.719
+# and slipped past the weaker assertion.
+#
+# The three mandated task kinds. Compaction fidelity, approval quality and streaming overhead each
+# measure a property that degrades without anyone noticing, which is why §37.2 names them rather
+# than leaving them to whoever writes tasks. A release missing one reports a suite that looks
+# complete, so coverage is checked at the release rather than trusted to review.
+#
+# Boundary: this decides admissibility. It runs no benchmark, builds no environment, and executes
+# no task -- it refuses definitions and results that could not be reproduced or compared.
+
+id: benchmark.results
+version: 1
+owner: platform
+security_class: medium
+
+requirements:
+  - PRD-v5.1-§37.1-task-classes
+  - PRD-v5.1-§37.2-benchmark-requirements
+
+surfaces:
+  desktop: equivalent
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: admin_only
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # A score on tests the agent can read is measuring its own reading.
+  - pkg/benchmark:TestSecurityAVisibleOnlyResultIsNotAScore
+  - pkg/benchmark:TestAPassRequiresBothTestSets
+  # §37.2's unattended subset is zero corrective messages. A subset admitting one nudge per task
+  # measures a different thing and reports it under the same name.
+  - pkg/benchmark:TestSecurityUnattendedMeansZeroCorrectiveMessages
+  # Failure taxonomy: the zero class is where an "other" bucket forms.
+  - pkg/benchmark:TestSecurityAFailedTrialMustBeClassified
+  # Cost normalization: all five parts, because a converted figure without rate and timestamp is a
+  # number somebody computed once.
+  - pkg/benchmark:TestSecurityAConvertedCostNeedsItsFXEvidence
+  # Multiple trials where stochasticity matters, and a deterministic task exempted so the flag means
+  # something.
+  - pkg/benchmark:TestSecurityAStochasticTaskNeedsMultipleTrials
+  # Confidence intervals: never zero-width at the extremes, which is where a benchmark gets quoted.
+  - pkg/benchmark:TestSecurityTheIntervalIsNotZeroWidthAtTheExtremes
+  # Fixed repository revisions and recorded model routing.
+  - pkg/benchmark:TestATrialWithoutAFixedRevisionIsRefused
+  - pkg/benchmark:TestTrialsFromAnotherTaskAreRefused
+  # Versioned benchmark release: an unversioned one compares with nothing, including a later run of
+  # what is nominally the same suite.
+  - pkg/benchmark:TestSecurityAnUnversionedReleaseIsRefused
+  # §37.1 classes, reproducible environments and the explicit verification contract. Each field is
+  # dropped independently, because a single witness passes an implementation that checks only one.
+  - pkg/benchmark:TestATaskMissingAnyReproducibilityFieldIsRefused
+  # §37.2's defined human-intervention allowance -- a per-task claim, distinct from the unattended
+  # subset. Inadmissible trials are refused rather than filtered: dropping them reports the subset
+  # that behaved, which is the highest number the data can be made to yield.
+  - pkg/benchmark:TestSecurityATrialExceedingTheInterventionAllowanceIsRefused
+  # Compaction-fidelity labels, approval-quality operations and streaming-overhead surfaces, each
+  # element dropped in turn.
+  - pkg/benchmark:TestSecurityAMandatedKindMustCarryEveryCategory
+  # Release-level coverage of all three mandated kinds.
+  - pkg/benchmark:TestSecurityAReleaseMustCoverEveryMandatedKind
+  - pkg/benchmark:TestTheTaskDecidesWhetherTheTrialFloorApplies
