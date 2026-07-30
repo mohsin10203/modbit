@@ -1,0 +1,71 @@
+# Capability: environment Blueprint and snapshot admission.
+#
+# §35's invariant asks that environment snapshots reference immutable Blueprint versions and content
+# digests, and the reason is that every convenient way to name a base image is mutable.
+# "ubuntu:24.04" is a moving target, "main" is whatever was pushed last, and both produce a snapshot
+# that reproduces a different environment next month while claiming to be the same one -- worse than
+# an environment that obviously drifted, because the snapshot id in the run record still matches. So
+# a base is a digest or it is refused, and there is no resolve-the-tag-at-build-time path, which
+# records what the tag meant on the day and leaves the Blueprint still saying something else.
+#
+# §23.20 surfaces setup commands as agent knowledge, and a Blueprint checked into a repository is
+# the natural place to write them -- which makes it INV-13 territory, because the commands are
+# authored by whoever can open a pull request. They are not refused, since that would make the
+# feature useless. Their provenance travels with them: SetupKnowledge returns the class alongside
+# the commands rather than leaving a caller to remember, and OriginRepository is the zero value so
+# a Blueprint nobody classified is treated as repository content.
+#
+# Snapshots are matched, not ranked. A "best available" selection is how a snapshot built for
+# another platform gets used when nothing better exists, and the failure surfaces much later as a
+# build error nobody connects to the environment. Every mismatch refuses with its reason.
+#
+# A pin restores what was pinned. Falling forward to the newest ready snapshot silently un-pins the
+# thing somebody pinned deliberately, most likely right after the newer build broke.
+#
+# Boundary: it builds nothing, runs no step, and pulls no image.
+
+id: environment.blueprint
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§23.20-blueprint-service
+  - PRD-v5.1-§35-immutable-snapshot-references
+
+surfaces:
+  desktop: equivalent
+  cli: required
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: admin_only
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # The immutable-reference invariant, at both levels: the Blueprint's base and the snapshot's
+  # content digest, plus the unversioned Blueprint reference that is the same problem one level up.
+  - pkg/blueprint:TestSecurityAMutableReferenceIsNotASnapshot
+  # INV-13. The path by which repository-authored instructions reach a model.
+  - pkg/blueprint:TestSecurityARepositoryBlueprintsCommandsCarryRepositoryProvenance
+  # Matched rather than ranked, with the reason named.
+  - pkg/blueprint:TestSecurityASnapshotIsRefusedWithAReasonRatherThanRankedLower
+  # Differential rebuilds. A partial chain looks like a complete one built on a different base, so
+  # a missing link is an error. The mutable-base case is asserted with a base that *does* resolve,
+  # because the first version of the test used an absent one and a missing-link error stood in for
+  # the real refusal -- letting a mutant that deleted the check survive.
+  - pkg/blueprint:TestSecurityARebuildChainWithAMissingLinkIsAnError
+  # Pinning restores the pinned snapshot, and a build that never became usable resolves to nothing.
+  - pkg/blueprint:TestSecurityAPinRestoresThePinnedSnapshotNotTheNewest
+  # A build step that fetches something nobody expected is how a dependency arrives in an image an
+  # audit says contains only what the Blueprint listed.
+  - pkg/blueprint:TestSecurityAnUndeclaredNetworkStepIsRefused
+  # INV-2 and INV-11. A secret in a Blueprint is a secret in every snapshot built from it and in
+  # every log line that echoes the command.
+  - pkg/blueprint:TestSecuritySecretMaterialInABlueprintIsRefused
+  # "Ready" as a zero value would make an interrupted build indistinguishable from a completed one.
+  - pkg/blueprint:TestSecurityTheZeroBuildStateIsNotUsable
+  - pkg/blueprint:TestSecurityABlueprintMustDeclareItsSteps
