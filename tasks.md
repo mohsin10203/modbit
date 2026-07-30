@@ -1432,7 +1432,7 @@ PRD §6.2. Docket §4. Includes v5.1 families **TNT** and **VAD** (docket placem
 | CTX-B01 | Deep graph and history | ⬜ Proposed |
 | CTX-B02 | Fast Context subagent | ⬜ Proposed |
 | WIKI-B01 | CodeWiki generation | ⬜ Proposed |
-| WIKI-B02 | Citation validator | ⬜ Proposed |
+| WIKI-B02 | Citation validator | ✅ Qualified — `pkg/codewiki`, 11 tests, W1–W8 invariants, six mutants caught (one survivor turned into a stronger test). WIKI-3 enforced as cited-or-labelled, WIKI-2 revision and snapshot binding checked per citation, WIKI-4 diagrams given no inference escape hatch. Built on `index.ContextItem` rather than a parallel citation type |
 | BRS-B01 | Scripted browser verification | ⬜ Proposed |
 | BRS-B02 | Full computer use on Linux | ⬜ Proposed |
 | EXE-B01 | Remote worker gateway | ⬜ Proposed |

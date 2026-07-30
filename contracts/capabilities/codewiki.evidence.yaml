@@ -1,0 +1,55 @@
+# Capability: CodeWiki citation validation.
+#
+# WIKI-3 requires every technical statement to link to source spans, artifacts, "or explicitly
+# labeled inferences". The third option is what makes the rule survivable: a generator that could
+# never say anything uncited would either omit every synthesis or fabricate a citation for it, and
+# the second failure is the one nobody catches.
+#
+# So this is the same shape as the degradation reason in runtime.degradation and the inconclusive
+# verdict in verification.adequacy -- the unsupported case is permitted and must be declared.
+
+id: codewiki.evidence
+version: 1
+owner: knowledge
+security_class: high
+
+requirements:
+  - PRD-v5.1-§9A-WIKI-2
+  - PRD-v5.1-§9A-WIKI-3
+  - PRD-v5.1-§9A-WIKI-4
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # WIKI-3: cited, or labelled and explained. Nothing else publishes.
+  - pkg/codewiki:TestSecurityAnUncitedTechnicalStatementIsRefused
+  - pkg/codewiki:TestAnInferenceIsPermittedOnlyWhenExplained
+  # The classifier's default branch is what enforces WIKI-3, not the zero value. A kind from a newer
+  # generator or a typo is held to the technical rule rather than treated as prose -- found because a
+  # mutation making KindTechnical non-zero survived, which showed the zero-value test did not reach
+  # the property it was named for.
+  - pkg/codewiki:TestTheZeroKindIsTechnical
+  - pkg/codewiki:TestSecurityAnUnrecognisedKindIsHeldToTheTechnicalRule
+  # WIKI-2 binds a page to one revision and one Context Snapshot. A citation from another is the
+  # failure that matters: the span is real, the file exists, the digest verifies, and it documents
+  # code the page is not about.
+  - pkg/codewiki:TestSecurityACitationFromAnotherRevisionIsRefused
+  - pkg/codewiki:TestSecurityACitationFromAnotherSnapshotIsRefused
+  - pkg/codewiki:TestSecurityAPageWithNoSnapshotCannotBeValidated
+  # WIKI-4: diagrams get no inference escape hatch, because a node drawn from nothing is a guess.
+  - pkg/codewiki:TestSecurityADiagramNodeNeedsEvidence
+  # A report names what failed so a generator regenerates the statement rather than the page, and
+  # splits cited from inferred -- an all-inference page is valid under WIKI-3 and worth noticing.
+  - pkg/codewiki:TestEveryFindingNamesWhatFailed
+  - pkg/codewiki:TestTheReportDistinguishesCitedFromInferred
+  - pkg/codewiki:TestADuplicateStatementIdentifierIsRefused
