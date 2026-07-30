@@ -1,0 +1,65 @@
+# Capability: Agent Command Center run visibility and action admission.
+#
+# §20.3 lists fourteen actions and eleven run categories, and the tempting implementation renders
+# all fourteen and lets the backend reject the ones that do not apply. That is a worse interface
+# than it looks: a Resume button on a completed run is not a harmless no-op, it is the product
+# telling a user the run can be resumed, and they plan around it. So the action set is derived from
+# the state.
+#
+# CRC-1 says overlap is surfaced "before either run creates a PR". The word *before* is the
+# requirement. A finding shown next to an enabled Create Pull Request button has been surfaced in
+# the sense that it is on the screen, and has not been surfaced in the sense the requirement means.
+# An unresolved overlap removes the action, and the refusal names the overlap rather than the run
+# state -- "not available in this state" would send somebody looking at the wrong thing.
+#
+# The organization is a parameter to View rather than a field on Filter. A filter is something a
+# user narrows; the boundary is not, and putting it in Filter would make the most important
+# constraint in the function the one a caller can leave blank. It is also checked before the filter,
+# so the boundary never depends on what was filtered.
+#
+# Two state decisions worth naming. A queued run can be cancelled -- a "cancel only what is running"
+# rule leaves a user unable to stop something that has not started, which is precisely when they
+# most want to. And a terminal run admits Archive, because that changes the record rather than the
+# run.
+#
+# Boundary: it starts no run, cancels nothing and renders no view.
+
+id: commandcenter.run-actions
+version: 1
+owner: platform
+security_class: high
+
+requirements:
+  - PRD-v5.1-§20.3-agent-command-center
+  - PRD-v5.1-§21.2-CRC-1
+  - PRD-v5.1-§21.2-CRC-5
+
+surfaces:
+  desktop: required
+  cli: equivalent
+  ts_sdk: equivalent
+  python_sdk: equivalent
+  web: required
+  extension: not_applicable
+
+events: []
+
+settings: []
+
+tests:
+  # §20.3's categories as a closed set, with Terminal derived from the category so a caller cannot
+  # mark a running run terminal to shed its actions.
+  - pkg/commandcenter:TestSecurityTheCategorySetIsClosedAndTheZeroIsNotDisplayable
+  # CRC-1 as a gate rather than a notification, with the refusal naming the overlap.
+  - pkg/commandcenter:TestSecurityAnUnresolvedOverlapRemovesCreatePullRequest
+  # A finished run is not doing anything, so nothing that would change what it is doing is offered.
+  - pkg/commandcenter:TestSecurityATerminalRunAdmitsNoStateChangingAction
+  # The two state decisions: a queued run cancels but does not attach, a paused one resumes but does
+  # not pause again.
+  - pkg/commandcenter:TestAQueuedRunCanBeCancelledButNotAttachedTo
+  # Attach and Take Over need a live run, not merely a non-terminal one.
+  - pkg/commandcenter:TestSecurityAttachAndTakeOverRequireALiveRun
+  # INV-10, including the empty-organization-and-no-runs case where the per-run check has nothing
+  # to catch.
+  - pkg/commandcenter:TestSecurityTheOrganizationBoundaryIsNotAFilter
+  - pkg/commandcenter:TestAFilterNarrowsAndNeverWidens
