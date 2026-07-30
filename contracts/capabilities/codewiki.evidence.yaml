@@ -77,3 +77,28 @@ tests:
   # will be retried from scratch or not at all, and neither is what anybody wanted. Cancellation and
   # failure both keep their pages and stay distinguishable: one is a user changing their mind.
   - pkg/codewiki:TestSecurityAStoppedGenerationKeepsItsCompletedPages
+  # WIKI-22 and the PRD's rejected proposal element 7: a wiki generated from a private repository
+  # cannot be published publicly. The case is easy to reach because the wiki *feels* like a separate
+  # artifact -- prose somebody generated rather than the code -- and it is a description of the
+  # private code detailed enough to be worth writing down, which is what makes publishing it look
+  # harmless and be the opposite. The repository's visibility is a caller-supplied fact, not a field
+  # of the share request, for the same reason WRK-3's organization is a parameter.
+  - pkg/codewiki:TestSecurityAPrivateRepositorysWikiCannotBePublished
+  - pkg/codewiki:TestSecurityPublishingIsOffByDefaultAndTheZeroVisibilityIsPrivate
+  # WIKI-14. The cheap way to satisfy it is a flag on each statement, and that works until something
+  # appends to the wrong list -- then WIKI-3's citation rule either rejects human prose or accepts
+  # uncited generated claims, and the second is the one that ships. Annotations live in their own
+  # field and the citation validator never sees them.
+  - pkg/codewiki:TestSecurityAnAnnotationIsAttributedAndOutsideTheCitationRules
+  # WIKI-12. "Where configured" is per path: a configuration naming one page must not switch cluster
+  # planning off for the whole repository.
+  - pkg/codewiki:TestSecurityAnExplicitPageOverridesOnlyItsOwnPath
+  # WIKI-15. Every problem with its line, in line order -- a configuration with four mistakes should
+  # take one round trip to fix, not four. Includes the hierarchy cycle a per-entry check misses.
+  - pkg/codewiki:TestSecurityEveryConfigurationProblemIsReportedWithItsLine
+  # WIKI-13. Annotations are the one part of a wiki that cannot be regenerated, so a rename carries
+  # them -- along with the configuration and both sides of the hierarchy.
+  - pkg/codewiki:TestSecurityARenameCarriesAnnotationsAndConfiguration
+  # WIKI-11. One Config and one validator: two structs kept in sync by intention drift apart the
+  # first time somebody adds a field to the form.
+  - pkg/codewiki:TestOneConfigurationSchemaServesBothSurfaces
