@@ -1,0 +1,60 @@
+# Capability: instruction rule precedence and conflict surfacing.
+#
+# RUL-2 -- conflicts "must be surfaced rather than silently resolved" -- is a stronger claim than it
+# reads. Precedence already picks a winner, so a resolver could apply it and say nothing, and the
+# output would still be deterministic and RUL-1 would still be satisfied. That silence is the
+# failure RUL-2 names: a repository rule saying "never run the linter" against an administrator rule
+# saying "always" is not a precedence question either author would recognise as settled. One of them
+# is wrong and neither knows it.
+#
+# RUL-5 is the security half. Repository-authored instructions must be distinguishable from
+# administrator policy, and INV-13 makes repository content untrusted input -- so distinguishable is
+# the floor. A precedence order letting a repository rule win would mean a file in a cloned
+# repository could switch off an organization's controls, which is prompt injection with a config
+# file for a delivery mechanism.
+
+id: instruction.rules
+version: 1
+owner: platform
+security_class: critical
+
+requirements:
+  - PRD-v5.1-§9C-RUL-1
+  - PRD-v5.1-§9C-RUL-2
+  - PRD-v5.1-§9C-RUL-3
+  - PRD-v5.1-§9C-RUL-4
+  - PRD-v5.1-§9C-RUL-5
+
+surfaces:
+  desktop: required
+  cli: required
+  ts_sdk: required
+  python_sdk: required
+  web: equivalent
+  extension: equivalent
+
+events: []
+
+settings: []
+
+tests:
+  # RUL-1 and RUL-5. Precedence is deterministic under input reordering, and repository content
+  # never outranks trusted policy. The zero Source is repository, so an unattributed rule cannot
+  # outrank one by omission -- the same restrictive-zero rule as the taint class and the sandbox
+  # enforcement level.
+  - pkg/rules:TestSecurityARepositoryRuleNeverOutranksAdministratorPolicy
+  - pkg/rules:TestSecurityTheZeroSourceIsUntrustedRepository
+  # RUL-2. The conflict is returned alongside the winner, and a trust-boundary crossing is flagged
+  # because it is either a mistake or an attempt. Agreement is not reported, or the disagreements
+  # get buried and the list stops being read.
+  - pkg/rules:TestSecurityAConflictIsSurfacedNotSilentlyResolved
+  - pkg/rules:TestAgreementIsNotAConflict
+  # RUL-3, and the refusal that matters: a malformed glob would otherwise disable a rule its author
+  # believes is active, which for an administrator rule is a control that is off and looks on.
+  - pkg/rules:TestConditionsNarrowByPathAndTaskType
+  - pkg/rules:TestSecurityAMalformedGlobIsRefusedNotIgnored
+  # RUL-4. The hash covers source, because the same text from a repository and from an administrator
+  # are different rules and a digest collapsing them could not prove which applied.
+  - pkg/rules:TestSecurityTheHashDistinguishesSource
+  - pkg/rules:TestUntrustedRulesAreSeparatelyEnumerable
+  - pkg/rules:TestAnInvalidRuleFailsResolution

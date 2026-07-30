@@ -1439,7 +1439,7 @@ PRD §6.2. Docket §4. Includes v5.1 families **TNT** and **VAD** (docket placem
 | EXE-B02 | Environment Blueprints/snapshots | ⬜ Proposed |
 | IDE-B01 | Agent Command Center | ⬜ Proposed |
 | IDE-B02 | Local-to-remote handoff | ⬜ Proposed |
-| EXT-B01 | Rules/Skills/Workflows/MCP | ⬜ Proposed |
+| EXT-B01 | Rules/Skills/Workflows/MCP | 🚧 In Progress — **RUL-1..RUL-5 Qualified**: `pkg/rules`, 9 tests, P1–P8 invariants, six mutants caught. Deterministic source precedence where repository content never outranks administrator policy (RUL-5 + INV-13), conflicts surfaced with trust-boundary crossings flagged rather than silently resolved, path and task-type conditions, and a set hash that distinguishes identical text from different sources. Skills (SKL-1..4), workflows and MCP registration need the agent run loop | ⬜ Proposed |
 | AGT-B02 | Session Insights | ⬜ Proposed |
 | QA-B01 | Autonomous benchmark | ⬜ Proposed |
 | TNT-01..07 | Provenance taint: tagger, propagation ledger, policy dimension, UI, adversarial suite | 🚧 In Progress — **library layer complete and now registered.** TNT-1/2/6 in `pkg/taint`, TNT-3/4/7 in `pkg/policy`. TNT-3, TNT-4 and TNT-7 had implementations and tests but **no capability claimed them**, so the evidence gate could not see them; `policy.side-effect` now does (19 tests). Remaining: TNT-5's composer, context chips, approval cards and status bar, which need the IDE shell |
