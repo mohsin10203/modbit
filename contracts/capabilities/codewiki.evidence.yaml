@@ -53,3 +53,27 @@ tests:
   - pkg/codewiki:TestEveryFindingNamesWhatFailed
   - pkg/codewiki:TestTheReportDistinguishesCitedFromInferred
   - pkg/codewiki:TestADuplicateStatementIdentifierIsRefused
+  # WIKI-1. Policy first and absolutely: a user setting that could re-enable what policy disabled
+  # would make the policy a suggestion, and that is the direction INV-9 forbids. With both off,
+  # policy is the reported reason -- the only case where the check order is observable, and the one
+  # that matters, because telling a user their setting disabled it sends them to flip a switch that
+  # changes nothing.
+  - pkg/codewiki:TestSecurityAUserSettingCannotReEnableGenerationPolicyDisabled
+  # WIKI-10's "but remains provider-policy compliant" is the requirement. A dedicated documentation
+  # model arrives as a special case in the config and the natural place to wire it is around
+  # whatever picks models for runs -- which is where the policy check lives. Then a deployment that
+  # forbids a provider finds its repositories documented by it.
+  - pkg/codewiki:TestSecurityTheDocumentationModelIsNotExemptFromProviderPolicy
+  # WIKI-6. "Fresh" as a zero value means a page goes stale silently the first time nobody runs the
+  # calculation, and a page that cannot say what it was derived from cannot be shown unaffected.
+  - pkg/codewiki:TestSecurityTheZeroFreshnessIsNotFresh
+  - pkg/codewiki:TestSecurityFreshnessMovesOnASymbolOrAnEdge
+  # WIKI-5. The refresh set is derived from freshness rather than computed again, because two
+  # implementations of "which pages are affected" is how a page stays marked stale forever.
+  - pkg/codewiki:TestSecurityTheRefreshSetAgreesWithFreshness
+  # WIKI-7. An effort a user cannot price is one they cannot agree to.
+  - pkg/codewiki:TestSecurityAnEffortWithoutACostOrDurationCannotBeOffered
+  # WIKI-8 and WIKI-9. A run that discards four hours of finished pages because stage six failed
+  # will be retried from scratch or not at all, and neither is what anybody wanted. Cancellation and
+  # failure both keep their pages and stay distinguishable: one is a user changing their mind.
+  - pkg/codewiki:TestSecurityAStoppedGenerationKeepsItsCompletedPages

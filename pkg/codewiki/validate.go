@@ -82,6 +82,13 @@ type Page struct {
 	SnapshotID id.ID          `json:"snapshot_id"`
 	Statements []Statement    `json:"statements"`
 	Diagram    []Node         `json:"diagram,omitempty"`
+	// Symbols and Edges are the indexed symbols and dependency edges the page was generated from.
+	// WIKI-6 recalculates freshness when these change, so a page has to say which ones it used;
+	// see Recalculate for why a page naming none is stale rather than fresh.
+	Symbols []string `json:"symbols,omitempty"`
+	Edges   []string `json:"edges,omitempty"`
+	// Explicit marks a page from WIKI-12's explicit configuration rather than cluster planning.
+	Explicit bool `json:"explicit,omitempty"`
 }
 
 // Finding is one reason a page cannot be published.
